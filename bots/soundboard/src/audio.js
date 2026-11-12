@@ -85,29 +85,54 @@ export function decodeClipToPcm(
   { spawnImpl = defaultSpawn, ffmpegBin = 'ffmpeg', signal } = {}
 ) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
     const args = buildFfmpegArgs(filePath);
-    const proc = spawnImpl(ffmpegBin, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      signal,
-    });
+    // The abort is handled explicitly (kill + reject) instead of via spawn's `signal` option so the
+    // behaviour is identical for injected spawn implementations.
+    const proc = spawnImpl(ffmpegBin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     const stdoutChunks = [];
     const stderrChunks = [];
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      fn(value);
+    };
+    const onAbort = () => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {}
+      finish(reject, abortError());
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     proc.stdout.on('data', (chunk) => stdoutChunks.push(Buffer.from(chunk)));
     proc.stderr.on('data', (chunk) => stderrChunks.push(Buffer.from(chunk)));
 
-    proc.on('error', (err) => {
-      reject(err);
-    });
+    proc.on('error', (err) => finish(reject, err));
 
     proc.on('close', (code) => {
       if (code !== 0) {
         const errMsg = Buffer.concat(stderrChunks).toString('utf8').trim();
-        reject(new Error(`ffmpeg exited with code ${code}${errMsg ? `: ${errMsg}` : ''}`));
+        finish(reject, new Error(`ffmpeg exited with code ${code}${errMsg ? `: ${errMsg}` : ''}`));
         return;
       }
-      resolve(Buffer.concat(stdoutChunks));
+      finish(resolve, Buffer.concat(stdoutChunks));
     });
   });
+}
+
+export function abortError() {
+  const err = new Error('Aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+export function isAbortError(err) {
+  return err?.name === 'AbortError';
 }

@@ -6,6 +6,7 @@ import {
   CHANNELS,
   SAMPLES_PER_FRAME,
   chunkPcmToFrames,
+  abortError,
 } from './audio.js';
 
 let cachedRtcModule = null;
@@ -52,17 +53,27 @@ export class RoomCallSession {
    * @param {number} [opts.idleTimeoutMs=60000]
    * @param {() => Promise<object>} [opts.rtcFactory=defaultRtcFactory]
    * @param {() => Promise<void>} [opts.onLeave]  Called before/when leaving so caller can clear Matrix state
+   * @param {() => Promise<void>} [opts.onRefresh]  Called every `refreshMs` while connected (call.member expiry refresh)
+   * @param {number} [opts.refreshMs=0]  Refresh interval; 0 disables
+   * @param {(reason?: unknown) => void} [opts.onDisconnected]  Called when the SFU drops the connection
    */
   constructor({
     roomId,
     idleTimeoutMs = 60_000,
     rtcFactory = defaultRtcFactory,
     onLeave = async () => {},
+    onRefresh = async () => {},
+    refreshMs = 0,
+    onDisconnected = () => {},
   }) {
     this.roomId = roomId;
     this.idleTimeoutMs = idleTimeoutMs;
     this.rtcFactory = rtcFactory;
     this.onLeave = onLeave;
+    this.onRefresh = onRefresh;
+    this.refreshMs = refreshMs;
+    this.onDisconnected = onDisconnected;
+    this._refreshTimer = null;
 
     this.connected = false;
     this.rtc = null;
@@ -83,6 +94,11 @@ export class RoomCallSession {
     if (this.connected) return;
     this.rtc = await this.rtcFactory();
     this.room = this.rtc.createRoom();
+    // RoomEvent.Disconnected ('disconnected') is emitted by @livekit/rtc-node only after its own
+    // reconnect attempts failed (or the server closed the room), so treat it as final: clean up.
+    if (typeof this.room.on === 'function') {
+      this.room.on('disconnected', (reason) => this._handleSfuDisconnect(reason));
+    }
     await this.room.connect(url, jwt, { autoSubscribe: false, dynacast: false });
 
     this.audioSource = this.rtc.createAudioSource(SAMPLE_RATE, CHANNELS);
@@ -92,6 +108,32 @@ export class RoomCallSession {
 
     this.connected = true;
     this._resetIdleTimer();
+    this._startRefreshTimer();
+  }
+
+  async _handleSfuDisconnect(reason) {
+    if (!this.connected) return; // we initiated this disconnect ourselves
+    try {
+      this.onDisconnected(reason);
+    } catch {}
+    await this.disconnect().catch(() => {});
+  }
+
+  _startRefreshTimer() {
+    this._stopRefreshTimer();
+    if (this.refreshMs > 0) {
+      this._refreshTimer = setInterval(() => {
+        Promise.resolve(this.onRefresh()).catch(() => {});
+      }, this.refreshMs);
+      if (typeof this._refreshTimer.unref === 'function') this._refreshTimer.unref();
+    }
+  }
+
+  _stopRefreshTimer() {
+    if (this._refreshTimer) {
+      clearInterval(this._refreshTimer);
+      this._refreshTimer = null;
+    }
   }
 
   /**
@@ -99,12 +141,15 @@ export class RoomCallSession {
    * Preempts any currently playing clip on the same room session.
    *
    * @param {Buffer} pcmBuffer
+   * @param {object} [opts]
+   * @param {AbortSignal} [opts.signal]  Aborting stops playback at the next frame
    * @returns {Promise<{ framesSent: number, interrupted: boolean }>}
    */
-  async playPcm(pcmBuffer) {
+  async playPcm(pcmBuffer, { signal } = {}) {
     if (!this.connected || !this.audioSource) {
       throw new Error('RoomCallSession is not connected');
     }
+    if (signal?.aborted) throw abortError();
     this._clearIdleTimer();
     const myToken = ++this._playToken;
 
@@ -120,7 +165,7 @@ export class RoomCallSession {
     let framesSent = 0;
     try {
       for (const samples of frames) {
-        if (this._playToken !== myToken || !this.connected) {
+        if (signal?.aborted || this._playToken !== myToken || !this.connected) {
           return { framesSent, interrupted: true };
         }
         const frame = this.rtc.createAudioFrame(
@@ -166,6 +211,7 @@ export class RoomCallSession {
    */
   async disconnect() {
     this._clearIdleTimer();
+    this._stopRefreshTimer();
     this._playToken++;
     const wasConnected = this.connected;
     this.connected = false;
