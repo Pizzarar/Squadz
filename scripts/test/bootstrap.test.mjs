@@ -2,7 +2,9 @@
 //
 // Idempotency tests for scripts/bootstrap.mjs, run against an in-process mock
 // homeserver (node:http). Proves the first run creates everything (admin, space,
-// rooms, emoji pack, invites) and a second run creates nothing.
+// rooms, emoji pack, invites) and a second run creates nothing, plus the review
+// fixes: image-pack emoji format, key-order-insensitive state compare, call
+// power levels, restricted join rules, multi-stage UIA and invite skipping.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -12,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { createMockHomeserver } from "./mock-homeserver.mjs";
 import { createMatrixClient } from "../lib/matrix.mjs";
 import { seed } from "../lib/seed.mjs";
+import { toUserId, toLocalpart, resolveConfig } from "../lib/config.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const emojiDir = path.resolve(here, "..", "..", "assets", "emoji");
@@ -22,7 +25,7 @@ const REG_TOKEN = "test-token";
 const mock = createMockHomeserver({ serverName: SERVER_NAME, registrationToken: REG_TOKEN });
 let baseUrl;
 
-function makeConfig() {
+function makeConfig(invite = [`@friend:${SERVER_NAME}`]) {
   return {
     serverName: SERVER_NAME,
     homeserverUrl: baseUrl,
@@ -30,7 +33,7 @@ function makeConfig() {
     adminUser: "admin",
     adminUserId: `@admin:${SERVER_NAME}`,
     adminPassword: "admin-password",
-    invite: [`@friend:${SERVER_NAME}`],
+    invite,
     emojiDir,
   };
 }
@@ -48,6 +51,8 @@ function stateOf(room, type, stateKey) {
 before(async () => {
   const port = await mock.start();
   baseUrl = mock.url(port);
+  // The friend being invited must already have an account on the server.
+  mock.state.users.set("friend", { password: "friend-password" });
 });
 
 after(async () => {
@@ -61,11 +66,12 @@ test("first run creates everything", async () => {
   assert.equal(summary.admin.registered, true, "admin should be registered on first run");
   assert.equal(summary.createdRooms, 6, "six child rooms should be created");
   assert.equal(summary.emoji.uploaded, 4, "four emoji PNGs should be uploaded");
-  assert.equal(summary.emoji.set, true, "emoji pack should be set");
-  assert.equal(summary.invited, 7, "friend invited to space + six rooms");
+  assert.equal(summary.emoji.set, 5, "emoji pack set on the Space + four text rooms");
+  assert.equal(summary.invited, 1, "friend invited to the Space only (rooms are restricted)");
 
-  // The mock saw the space creation too. The UIA registration flow hits
-  // /register twice (challenge + token), and the admin logs in once first.
+  // The mock saw the space creation too. The multi-stage UIA registration hits
+  // /register three times (challenge + registration_token + dummy), and the
+  // admin logs in once first.
   assert.equal(mock.state.counts.createRoom, 7, "space + six rooms");
   assert.ok(mock.state.counts.register >= 1, "a registration happened");
   assert.ok(mock.state.counts.login >= 1, "an initial login attempt happened");
@@ -86,7 +92,7 @@ test("second run creates nothing", async () => {
   assert.equal(summary.admin.registered, false, "admin already exists, so no registration");
   assert.equal(summary.createdRooms, 0, "no rooms created on second run");
   assert.equal(summary.emoji.uploaded, 0, "no media uploaded on second run");
-  assert.equal(summary.emoji.set, false, "emoji pack left untouched");
+  assert.equal(summary.emoji.set, 0, "emoji pack left untouched");
   assert.equal(summary.invited, 0, "friend already invited, nothing to do");
 
   for (const key of MUTATIONS) {
@@ -116,6 +122,19 @@ test("space and rooms are linked with m.space.child / m.space.parent", async () 
   }
 });
 
+test("child rooms use restricted join rules allowing Space membership", () => {
+  const space = roomBySlug("squadz");
+  const slugs = ["general", "games", "clips", "memes", "lounge", "game-night"];
+  for (const slug of slugs) {
+    const room = roomBySlug(slug);
+    const joinRules = stateOf(room, "m.room.join_rules", "");
+    assert.equal(joinRules.join_rule, "restricted", `${slug} is restricted`);
+    assert.deepEqual(joinRules.allow, [{ type: "m.room_membership", room_id: space.roomId }]);
+  }
+  // The Space itself is joined via invite, not restricted.
+  assert.equal(stateOf(space, "m.room.join_rules", ""), undefined, "space has no join_rules override");
+});
+
 test("voice rooms are MatrixRTC call rooms; #clips is unencrypted for the bot", async () => {
   const RTC_SLOT = "org.matrix.msc4143.rtc.slot";
 
@@ -137,15 +156,45 @@ test("voice rooms are MatrixRTC call rooms; #clips is unencrypted for the bot", 
   assert.equal(stateOf(roomBySlug("clips"), "m.room.encryption", ""), undefined, "#clips is unencrypted");
 });
 
-test("emoji pack is set on the Space (MSC2545 im.ponies.room_emotes)", async () => {
+test("call-membership events are allowed (level 0) in voice rooms and #clips", () => {
+  const CALL_EVENTS = [
+    "org.matrix.msc3401.call.member",
+    "org.matrix.msc4143.rtc.member",
+    "m.rtc.member",
+  ];
+  for (const slug of ["lounge", "game-night", "clips"]) {
+    const room = roomBySlug(slug);
+    const pl = stateOf(room, "m.room.power_levels", "");
+    for (const ev of CALL_EVENTS) {
+      assert.equal(pl.events[ev], 0, `${slug} allows ${ev} at 0`);
+    }
+  }
+  // A text room that doesn't host calls gets no call-membership override.
+  assert.equal(
+    stateOf(roomBySlug("general"), "m.room.power_levels", "").events["org.matrix.msc4143.rtc.member"],
+    undefined,
+    "general has no call-member override",
+  );
+});
+
+test("emoji pack uses MSC2545 image-pack format on the Space and text rooms", async () => {
   const space = roomBySlug("squadz");
-  const pack = stateOf(space, "im.ponies.room_emotes", "");
-  assert.ok(pack, "emoji pack exists");
-  const shortcodes = Object.keys(pack);
-  assert.deepEqual(shortcodes.sort(), ["gg", "party", "squadz", "wave"]);
-  for (const code of shortcodes) {
-    assert.ok(pack[code].url.startsWith("mxc://"), `${code} has an mxc url`);
-    assert.equal(pack[code].info.mimetype, "image/png");
+  for (const slug of ["squadz", "general", "games", "clips", "memes"]) {
+    const room = roomBySlug(slug);
+    const pack = stateOf(room, "im.ponies.room_emotes", "");
+    assert.ok(pack, `emoji pack exists on ${slug}`);
+    assert.equal(pack.pack?.display_name, "Squadz", `${slug} pack has a display_name`);
+    assert.deepEqual(pack.pack?.usage, ["emoticon"], `${slug} pack usage is emoticon`);
+    assert.ok(pack.images, `${slug} pack has an images map`);
+    const shortcodes = Object.keys(pack.images);
+    assert.deepEqual(shortcodes.sort(), ["gg", "party", "squadz", "wave"]);
+    for (const code of shortcodes) {
+      const image = pack.images[code];
+      assert.ok(image.url.startsWith("mxc://"), `${code} has an mxc url`);
+      assert.equal(image.body, code, `${code} body is the shortcode`);
+      assert.equal(image.info.mimetype, "image/png");
+      assert.equal(image.usage, undefined, `${code} has no per-image usage (usage is on the pack)`);
+    }
   }
 });
 
@@ -156,4 +205,63 @@ test("room aliases resolve to the seeded rooms", async () => {
     assert.ok(roomId, `#${slug} resolves`);
     assert.equal(mock.state.aliases.get(`#${slug}:${SERVER_NAME}`), roomId);
   }
+});
+
+test("setStateIfChanged ignores key order (no PUT when state matches)", async () => {
+  const space = roomBySlug("squadz");
+  const general = roomBySlug("general");
+  // Reorder the stored m.space.child content so JSON.stringify would differ
+  // but the value is semantically identical.
+  const key = `m.space.child\u0000${general.roomId}`;
+  const original = space.state.get(key);
+  space.state.set(key, { order: original.order, suggested: original.suggested, via: original.via });
+
+  const before = mock.state.counts.putState;
+  const client = createMatrixClient(baseUrl);
+  await seed(client, makeConfig());
+  assert.equal(mock.state.counts.putState, before, "no PUT for a state that differs only in key order");
+});
+
+test("registration completes the multi-stage UIA flow (token then dummy)", async () => {
+  const client = createMatrixClient(baseUrl);
+  const result = await client.register("carol", "carol-password", REG_TOKEN);
+  assert.equal(result.user_id, `@carol:${SERVER_NAME}`);
+  assert.ok(result.access_token, "registration returns an access token");
+
+  const stages = mock.state.registerStages.filter((s) => s.username === "carol").map((s) => s.type);
+  assert.deepEqual(stages, ["m.login.registration_token", "m.login.dummy"]);
+});
+
+test("inviteFriends skips users that do not exist yet with a clear message", async () => {
+  const messages = [];
+  const client = createMatrixClient(baseUrl);
+  const summary = await seed(client, makeConfig([`@ghost:${SERVER_NAME}`]), (m) => messages.push(m));
+
+  assert.equal(summary.invited, 0, "non-existent user is not invited");
+  assert.ok(
+    messages.some((m) => m.includes("skip invite for @ghost") && m.includes("does not exist")),
+    "logs a clear skip message",
+  );
+});
+
+test("toUserId accepts localpart, @localpart and full MXID", () => {
+  assert.equal(toUserId("aub", "chat.example"), "@aub:chat.example");
+  assert.equal(toUserId("@aub", "chat.example"), "@aub:chat.example");
+  assert.equal(toUserId("@aub:chat.example", "other.example"), "@aub:chat.example");
+
+  assert.equal(toLocalpart("@aub:chat.example"), "aub");
+  assert.equal(toLocalpart("aub"), "aub");
+});
+
+test("resolveConfig derives server name, admin MXID and homeserver URL", () => {
+  const cfg = resolveConfig({
+    CHAT_FQDN: "chat.example",
+    SQUADZ_ADMIN_PASSWORD: "pw",
+    TUWUNEL_REGISTRATION_TOKEN: "tok",
+  });
+  assert.equal(cfg.serverName, "chat.example");
+  assert.equal(cfg.adminUser, "admin");
+  assert.equal(cfg.adminUserId, "@admin:chat.example");
+  assert.equal(cfg.homeserverUrl, "https://chat.example");
+  assert.equal(cfg.registrationToken, "tok");
 });

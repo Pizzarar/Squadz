@@ -33,6 +33,8 @@ export function createMockHomeserver({ serverName, registrationToken }) {
     mediaCount: 0,
     // Mutation counters used by the idempotency test.
     counts: { register: 0, login: 0, createRoom: 0, upload: 0, invite: 0, putState: 0 },
+    // Auth stage sequence observed during registration (for the UIA test).
+    registerStages: [], // { username, type }
   };
 
   const server = http.createServer((req, res) => {
@@ -92,21 +94,38 @@ export function createMockHomeserver({ serverName, registrationToken }) {
           return error(res, 400, "M_USER_IN_USE", "Desired user ID is already taken.");
         }
         const auth = body?.auth;
+        const flows = [{ stages: ["m.login.registration_token", "m.login.dummy"] }];
         if (!auth?.session) {
-          // First step of the UIA flow: challenge for the registration token.
+          // First step of the UIA flow: challenge for the token + dummy stages.
+          return json(res, 401, { session: "session-1", flows, params: {} });
+        }
+        state.registerStages.push({ username: localpart, type: auth.type });
+
+        if (auth.type === "m.login.registration_token") {
+          if (auth.token !== registrationToken) {
+            return error(res, 401, "M_UNAUTHORIZED", "Invalid registration token");
+          }
+          // Token accepted; the dummy stage remains.
           return json(res, 401, {
             session: "session-1",
-            flows: [{ stages: ["m.login.registration_token"] }],
+            completed: ["m.login.registration_token"],
+            flows,
             params: {},
           });
         }
-        if (auth.type !== "m.login.registration_token" || auth.token !== registrationToken) {
-          return error(res, 401, "M_UNAUTHORIZED", "Invalid registration token");
+
+        if (auth.type === "m.login.dummy") {
+          state.users.set(localpart, { password: body?.password });
+          const token = `tok-${localpart}-${state.tokens.size + 1}`;
+          state.tokens.set(token, localpart);
+          return json(res, 200, {
+            user_id: `@${localpart}:${serverName}`,
+            access_token: token,
+            device_id: "BOOTSTRAP",
+          });
         }
-        state.users.set(localpart, { password: body?.password });
-        const token = `tok-${localpart}-${state.tokens.size + 1}`;
-        state.tokens.set(token, localpart);
-        return json(res, 200, { user_id: `@${localpart}:${serverName}`, access_token: token, device_id: "BOOTSTRAP" });
+
+        return error(res, 401, "M_UNAUTHORIZED", "Unexpected registration auth stage");
       }
 
       // --- room alias resolution ----------------------------------------
@@ -157,7 +176,12 @@ export function createMockHomeserver({ serverName, registrationToken }) {
         const roomId = decodeURIComponent(inviteMatch[1]);
         const room = state.rooms.get(roomId);
         if (!room) return error(res, 404, "M_NOT_FOUND", "Unknown room");
-        room.members.set(body.user_id, { membership: "invite" });
+        const userId = body.user_id;
+        const localpart = userId.startsWith("@") ? userId.slice(1).split(":")[0] : userId;
+        if (!state.users.has(localpart)) {
+          return error(res, 404, "M_NOT_FOUND", "User does not exist");
+        }
+        room.members.set(userId, { membership: "invite" });
         return json(res, 200, {});
       }
 
