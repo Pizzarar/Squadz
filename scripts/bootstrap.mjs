@@ -23,7 +23,7 @@ const USAGE = `Usage: node bootstrap.mjs [options]
 
 Options:
   --env-file <path>      Load KEY=VALUE config from a .env-style file.
-  --invite <mxid> ...    Invite these Matrix user IDs to the Space + rooms.
+  --invite <user> ...    Invite these users (localpart, @localpart or full @user:server).
   --homeserver-url <url> Override the homeserver base URL (default https://CHAT_FQDN).
   -h, --help             Show this help.
 
@@ -42,8 +42,10 @@ function parseArgs(argv) {
       opts.homeserverUrl = argv[++i];
       if (!opts.homeserverUrl) throw new Error(`${arg} requires a URL`);
     } else if (arg === "--invite") {
-      // Collect every following @-prefixed argument.
-      while (argv[i + 1] && argv[i + 1].startsWith("@")) opts.invite.push(argv[++i]);
+      // Collect every following argument up to the next option flag. Accepts a
+      // localpart ("aub"), a bare MXID localpart ("@aub") or a full MXID
+      // ("@aub:chat.example"); toUserId() normalises them all.
+      while (argv[i + 1] && !argv[i + 1].startsWith("-")) opts.invite.push(argv[++i]);
     } else if (arg.startsWith("--invite=")) {
       opts.invite.push(arg.slice("--invite=".length));
     } else if (arg === "-h" || arg === "--help") {

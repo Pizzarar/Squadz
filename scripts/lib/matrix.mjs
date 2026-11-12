@@ -25,6 +25,35 @@ function enc(segment) {
 }
 
 /**
+ * Choose the registration UIA stages to complete, from the server's offered
+ * flows. We support `m.login.registration_token` and `m.login.dummy`; pick the
+ * first flow made up entirely of those stages. Returns the ordered stage list.
+ */
+function selectRegistrationStages(flows, registrationToken) {
+  for (const flow of flows) {
+    const stages = flow.stages ?? [];
+    if (stages.length === 0) continue;
+    if (stages.every((s) => s === "m.login.registration_token" || s === "m.login.dummy")) {
+      if (stages.includes("m.login.registration_token") && !registrationToken) {
+        throw new MatrixError(
+          401,
+          "M_FORBIDDEN",
+          "TUWUNEL_REGISTRATION_TOKEN is required to register",
+          null,
+        );
+      }
+      return stages;
+    }
+  }
+  throw new MatrixError(
+    401,
+    "M_FORBIDDEN",
+    "Server requires an unsupported registration flow",
+    { flows },
+  );
+}
+
+/**
  * Create a Matrix CS API client. After login/register, set `client.token` to
  * authenticate subsequent calls.
  *
@@ -95,21 +124,22 @@ export function createMatrixClient(baseUrl) {
     },
 
     /**
-     * Register a new user using the m.login.registration_token User-Interactive
-     * Authentication flow (Matrix spec). Throws MatrixError with errcode
-     * M_USER_IN_USE if the username is already taken.
+     * Register a new user using User-Interactive Authentication (Matrix spec).
+     * The server may demand several stages in sequence (e.g. the
+     * `m.login.registration_token` stage, then a `m.login.dummy` stage), so we
+     * drive each stage in turn until the server accepts. Throws MatrixError
+     * with errcode M_USER_IN_USE if the username is already taken.
      *
      * @returns {{ user_id: string, access_token: string }}
      */
     async register(localpart, password, registrationToken) {
-      // 1. Ask for the UIA session (server replies 401 with a session + flows).
+      const body = { username: localpart, password };
+
+      // 1. First attempt without auth: open registration accepts immediately.
       let challenge;
       try {
-        await client.request("POST", "/_matrix/client/v3/register", {
-          body: { username: localpart, password },
-        });
-        // Open registration: no UIA required. The server registered us already;
-        // fall through to log in so we obtain a token.
+        await client.request("POST", "/_matrix/client/v3/register", { body });
+        // No UIA required — the server already registered us. Log in for a token.
         return client.login(localpart, password);
       } catch (err) {
         if (!(err instanceof MatrixError) || err.status !== 401 || !err.data?.session) {
@@ -118,27 +148,34 @@ export function createMatrixClient(baseUrl) {
         challenge = err.data;
       }
 
-      // 2. Complete the flow with the registration token.
-      if (!registrationToken) {
-        throw new MatrixError(401, "M_FORBIDDEN", "TUWUNEL_REGISTRATION_TOKEN is required to register", null);
-      }
-      const flows = challenge.flows ?? [];
-      const needsToken = flows.some((f) => (f.stages ?? []).includes("m.login.registration_token"));
-      if (!needsToken) {
-        throw new MatrixError(401, "M_FORBIDDEN", "Server does not accept m.login.registration_token", challenge);
+      // 2. Pick a flow we can complete (registration token and/or dummy stages).
+      const stages = selectRegistrationStages(challenge.flows ?? [], registrationToken);
+
+      // 3. Complete each stage. A 401 with a session means "stage accepted,
+      //    keep going"; the final success returns user_id + access_token.
+      let session = challenge.session;
+      for (const stage of stages) {
+        const auth = { type: stage, session };
+        if (stage === "m.login.registration_token") auth.token = registrationToken;
+        try {
+          return await client.request("POST", "/_matrix/client/v3/register", {
+            body: { ...body, auth },
+          });
+        } catch (err) {
+          if (err instanceof MatrixError && err.status === 401 && err.data?.session) {
+            session = err.data.session;
+            continue;
+          }
+          throw err;
+        }
       }
 
-      return client.request("POST", "/_matrix/client/v3/register", {
-        body: {
-          username: localpart,
-          password,
-          auth: {
-            type: "m.login.registration_token",
-            token: registrationToken,
-            session: challenge.session,
-          },
-        },
-      });
+      throw new MatrixError(
+        401,
+        "M_FORBIDDEN",
+        "Registration flow could not be completed",
+        challenge,
+      );
     },
 
     // --- Rooms -----------------------------------------------------------

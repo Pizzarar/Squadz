@@ -34,15 +34,16 @@ export function loadEnvFile(filePath) {
 }
 
 /**
- * Turn a localpart ("aub") or full MXID ("@aub:chat.example") into a full MXID.
+ * Turn a localpart ("aub"), bare localpart ("@aub") or full MXID
+ * ("@aub:chat.example") into a full MXID.
  *
  * @param {string} user
  * @param {string} serverName
  * @returns {string}
  */
 export function toUserId(user, serverName) {
-  if (user.includes(":")) return user;
-  return `@${user}:${serverName}`;
+  const id = user.startsWith("@") ? user : `@${user}`;
+  return id.includes(":") ? id : `${id}:${serverName}`;
 }
 
 /**

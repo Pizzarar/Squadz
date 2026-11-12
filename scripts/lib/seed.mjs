@@ -8,6 +8,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 // ---------------------------------------------------------------------------
 // Seeded topology (matches docs/plans/P1-foundation.md § Contract)
@@ -25,14 +26,20 @@ export const ROOMS = [
   { slug: "general", name: "General", voice: false, encrypted: true },
   { slug: "games", name: "Games", voice: false, encrypted: true },
   // #clips is where the soundboard bot (B3) listens. The bot speaks plain
-  // `fetch` (no E2EE), so this room is deliberately left unencrypted.
-  { slug: "clips", name: "Clips", voice: false, encrypted: false },
+  // `fetch` (no E2EE), so this room is deliberately left unencrypted. The bot
+  // also joins calls here, so members get call-membership power (calls: true)
+  // even though it is not a dedicated voice room (no pre-opened call slot).
+  { slug: "clips", name: "Clips", voice: false, encrypted: false, calls: true },
   { slug: "memes", name: "Memes", voice: false, encrypted: true },
   { slug: "lounge", name: "Lounge", voice: true, encrypted: true },
   { slug: "game-night", name: "Game Night", voice: true, encrypted: true },
 ];
 
-const EMOJI_STATE_TYPE = "im.ponies.room_emotes"; // MSC2545 unstable identifier (what Element X implements)
+// MSC2545 ("Image Packs") room state event type. `im.ponies.room_emotes` is the
+// unstable identifier (Element X / Element desktop read this today); the stable
+// `m.room.image_pack` is not widely deployed yet. Content is
+// `{ pack: { display_name, usage }, images: { <shortcode>: { url, body, info } } }`.
+const EMOJI_STATE_TYPE = "im.ponies.room_emotes";
 
 // ---------------------------------------------------------------------------
 // Voice-room / MatrixRTC setup
@@ -71,11 +78,15 @@ function rtcSlotEvent() {
 
 /**
  * Full m.room.power_levels content. Admin holds 100; friends are default (0)
- * and can message, react, and hop in/out of calls. Voice rooms additionally
- * grant legacy `m.call.member` state events at 0 so older clients (pre-sticky
- * MatrixRTC) can also join.
+ * and can message, react, and hop in/out of calls. Rooms where calls happen
+ * (dedicated voice rooms and `#clips`, where the soundboard bot joins) grant
+ * every call-membership event type at 0 so any member can join/leave calls:
+ *   - legacy MSC3401 group-call signalling (`org.matrix.msc3401.call`,
+ *     `org.matrix.msc3401.call.member`) for older clients;
+ *   - MatrixRTC membership (`org.matrix.msc4143.rtc.member`, unstable — what
+ *     current Element Call / Element X send — and `m.rtc.member`, stable).
  */
-function powerLevels(adminUserId, voice) {
+function powerLevels(adminUserId, calls) {
   const events = {
     "m.room.avatar": 50,
     "m.room.canonical_alias": 50,
@@ -86,9 +97,11 @@ function powerLevels(adminUserId, voice) {
     "m.room.server_acl": 100,
     "m.room.tombstone": 100,
   };
-  if (voice) {
+  if (calls) {
     events["org.matrix.msc3401.call"] = 0;
     events["org.matrix.msc3401.call.member"] = 0;
+    events["org.matrix.msc4143.rtc.member"] = 0;
+    events["m.rtc.member"] = 0;
   }
   return {
     ban: 50,
@@ -103,19 +116,32 @@ function powerLevels(adminUserId, voice) {
   };
 }
 
-function buildCreateRoomBody(config, def) {
+function buildCreateRoomBody(config, def, spaceId) {
   const body = {
     name: def.name,
     room_alias_name: def.slug,
     preset: "private_chat",
-    power_level_content_override: powerLevels(config.adminUserId, def.voice),
+    power_level_content_override: powerLevels(config.adminUserId, def.voice || def.calls),
   };
+
+  const initial_state = [];
 
   if (def.space) {
     body.creation_content = { type: "m.space" };
+  } else if (spaceId) {
+    // Restricted join rules (MSC3083, in the spec): anyone who is a member of
+    // the Space may join the room without a separate invite. The admin still
+    // creates and is a member of every room, so seeding is unaffected.
+    initial_state.push({
+      type: "m.room.join_rules",
+      state_key: "",
+      content: {
+        join_rule: "restricted",
+        allow: [{ type: "m.room_membership", room_id: spaceId }],
+      },
+    });
   }
 
-  const initial_state = [];
   if (def.encrypted) {
     initial_state.push({
       type: "m.room.encryption",
@@ -138,7 +164,7 @@ function buildCreateRoomBody(config, def) {
 /** PUT a state event only if it differs from (or is absent in) current state. */
 async function setStateIfChanged(client, roomId, type, stateKey, content) {
   const current = await client.getState(roomId, type, stateKey);
-  if (current && JSON.stringify(current) === JSON.stringify(content)) return false;
+  if (current && isDeepStrictEqual(current, content)) return false;
   await client.putState(roomId, type, stateKey, content);
   return true;
 }
@@ -185,11 +211,11 @@ async function ensureAdmin(client, config) {
 }
 
 /** Ensure a room (or space) exists by alias, creating it if necessary. */
-async function ensureRoom(client, config, def) {
+async function ensureRoom(client, config, def, spaceId) {
   const alias = `#${def.slug}:${config.serverName}`;
   const existing = await client.resolveAlias(alias);
   if (existing) return existing;
-  const { room_id } = await client.createRoom(buildCreateRoomBody(config, def));
+  const { room_id } = await client.createRoom(buildCreateRoomBody(config, def, spaceId));
   return room_id;
 }
 
@@ -208,15 +234,27 @@ async function ensureSpaceLinks(client, config, spaceId, roomIds) {
   return changed;
 }
 
-/** Create the emoji pack (MSC2545 im.ponies.room_emotes) on the Space. */
-async function ensureEmojiPack(client, config, spaceId, emojiDir) {
+/**
+ * Create the emoji pack (MSC2545 im.ponies.room_emotes) on the Space and in
+ * every text room. Uploading happens once; the same MXC URLs are referenced
+ * everywhere. Setting it per text room (rather than relying on the Space or on
+ * per-user `im.ponies.emote_rooms` account data) makes the pack available in
+ * the picker automatically for every member of the room.
+ */
+async function ensureEmojiPack(client, config, spaceId, roomIds) {
+  const textRooms = ["general", "games", "clips", "memes"]
+    .map((slug) => roomIds[slug])
+    .filter(Boolean);
+  const targets = [spaceId, ...textRooms];
+
   const current = await client.getState(spaceId, EMOJI_STATE_TYPE, "");
   if (current && Object.keys(current).length > 0) {
-    return { uploaded: 0, set: false };
+    return { uploaded: 0, set: 0 };
   }
 
+  const emojiDir = config.emojiDir;
   const files = readdirSync(emojiDir).filter((f) => f.toLowerCase().endsWith(".png")).sort();
-  const content = {};
+  const images = {};
   let uploaded = 0;
   for (const file of files) {
     const shortcode = file.replace(/\.png$/i, "");
@@ -224,31 +262,49 @@ async function ensureEmojiPack(client, config, spaceId, emojiDir) {
     const { content_uri } = await client.upload(file, bytes, "image/png");
     uploaded++;
     const { w, h } = pngDimensions(bytes);
-    content[shortcode] = {
+    images[shortcode] = {
       url: content_uri,
       body: shortcode,
       info: { w, h, size: bytes.length, mimetype: "image/png" },
     };
   }
 
-  if (Object.keys(content).length > 0) {
-    await client.putState(spaceId, EMOJI_STATE_TYPE, "", content);
-    return { uploaded, set: true };
+  if (uploaded === 0) return { uploaded: 0, set: 0 };
+
+  // MSC2545 (Image Packs) content: a `pack` object plus an `images` map.
+  const content = {
+    pack: { display_name: "Squadz", usage: ["emoticon"] },
+    images,
+  };
+
+  let set = 0;
+  for (const roomId of targets) {
+    if (await setStateIfChanged(client, roomId, EMOJI_STATE_TYPE, "", content)) set++;
   }
-  return { uploaded, set: false };
+  return { uploaded, set };
 }
 
-/** Invite each friend to the Space and every child room (skips existing members). */
-async function inviteFriends(client, config, spaceId, roomIds) {
-  const targets = [spaceId, ...Object.values(roomIds)];
+/**
+ * Invite each friend to the Space. Child rooms use restricted join rules that
+ * admit any Space member, so a friend who joins the Space can enter every room
+ * without separate invites. Users that do not exist on the server yet are
+ * skipped with a message rather than failing the run.
+ */
+async function inviteFriends(client, config, spaceId, log) {
   let invited = 0;
   for (const friend of config.invite ?? []) {
     const userId = friend.includes(":") ? friend : `@${friend}:${config.serverName}`;
-    for (const roomId of targets) {
-      const member = await client.getMember(roomId, userId);
-      if (member && (member.membership === "join" || member.membership === "invite")) continue;
-      await client.invite(roomId, userId);
+    const member = await client.getMember(spaceId, userId);
+    if (member && (member.membership === "join" || member.membership === "invite")) continue;
+    try {
+      await client.invite(spaceId, userId);
       invited++;
+    } catch (err) {
+      if (err.errcode === "M_NOT_FOUND" || err.status === 404) {
+        log(`skip invite for ${userId}: user does not exist yet (they must register first)`);
+        continue;
+      }
+      throw err;
     }
   }
   return invited;
@@ -274,7 +330,7 @@ export async function seed(client, config, log = () => {}) {
     roomIds: {},
     createdRooms: 0,
     spaceLinksChanged: 0,
-    emoji: { uploaded: 0, set: false },
+    emoji: { uploaded: 0, set: 0 },
     invited: 0,
   };
 
@@ -282,7 +338,7 @@ export async function seed(client, config, log = () => {}) {
   log(`admin: ${summary.admin.userId} (${summary.admin.registered ? "registered" : "existing"})`);
 
   // Space first, then child rooms.
-  const spaceId = await ensureRoom(client, config, SPACE);
+  const spaceId = await ensureRoom(client, config, SPACE, null);
   summary.spaceId = spaceId;
 
   const roomIds = {};
@@ -291,7 +347,7 @@ export async function seed(client, config, log = () => {}) {
     if (existing) {
       roomIds[room.slug] = existing;
     } else {
-      const { room_id } = await client.createRoom(buildCreateRoomBody(config, room));
+      const { room_id } = await client.createRoom(buildCreateRoomBody(config, room, spaceId));
       roomIds[room.slug] = room_id;
       summary.createdRooms++;
     }
@@ -301,11 +357,11 @@ export async function seed(client, config, log = () => {}) {
   for (const slug of Object.keys(roomIds)) log(`  ${slug}: ${roomIds[slug]}`);
 
   summary.spaceLinksChanged = await ensureSpaceLinks(client, config, spaceId, roomIds);
-  summary.emoji = await ensureEmojiPack(client, config, spaceId, config.emojiDir);
-  summary.invited = await inviteFriends(client, config, spaceId, roomIds);
+  summary.emoji = await ensureEmojiPack(client, config, spaceId, roomIds);
+  summary.invited = await inviteFriends(client, config, spaceId, log);
 
   log(
-    `emoji: ${summary.emoji.uploaded} uploaded, pack ${summary.emoji.set ? "set" : "already present"}; ` +
+    `emoji: ${summary.emoji.uploaded} uploaded, pack set in ${summary.emoji.set} room(s); ` +
       `invited ${summary.invited} friend(s)`,
   );
 
