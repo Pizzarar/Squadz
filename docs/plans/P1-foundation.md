@@ -68,7 +68,7 @@ All four run in parallel: disjoint files, and the contract above pins every cros
 Write the full stack per the contract. Pin image tags (no `latest`): Tuwunel, LiveKit server,
 lk-jwt-service (`ghcr.io/element-hq/lk-jwt-service`), Caddy. Tuwunel: federation off, token
 registration, RocksDB volume, MatrixRTC/well-known settings if Tuwunel supports them natively (check
-its docs; Caddy serves the well-known either way). LiveKit: `rtc.node_ip: ${MESH_IP}`,
+its docs; Caddy serves the well-known either way). LiveKit: node IP via the `--node-ip ${MESH_IP}` CLI flag (LiveKit does not expand env vars in YAML),
 `use_external_ip: false`, port range 50000-50100, tcp 7881, keys from env. lk-jwt-service:
 `LIVEKIT_URL=wss://RTC_FQDN/livekit/sfu`, `LIVEKIT_FULL_ACCESS_HOMESERVERS=CHAT_FQDN`.
 `scripts/validate.mjs` (Node, no deps or a vendored YAML parser in `scripts/package.json` shared with
