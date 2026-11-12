@@ -128,3 +128,7 @@ first deploy, Element X phone check with 3 friends.
   - B4a: Gemini worker died on API EOF; rn-c6da1b38ae74 (Gemini failover) also died on stream interruptions (archived). Draft is committed (f89f780, 169 lines, sections 1-7 present, never self-checked). Next: review with Review - Sonnet after the Claude reset (Gemini wrote it), checking the codec/bitrate figures and sources. Then B4b golive page from STREAMING.md section 6.
   - Merge order once each review passes: B1, B2, B3, B4 into dev; write CREDITS.md from the workers' credits lines.
   - Claude capped until 07:00Z: new Claude spawns queue on Gemini (3 concurrent). Prefer Work Order - DSP for clear-scope fixes.
+- 2026-11-12 ~07:45Z (Squ2):
+  - B2: re-review PASS 0/0/0 d6de57d (rn-1cc85701737f; AGREE on MSC3417 rejection). MERGED into dev, 13/13 on dev.
+  - B3: fix done 211ced0 (38/38, rn-fc31f24b2be2). Re-review: Review - Gemini rn-f25668f736f1.
+  - B4a: review FAIL 1/4/3 f89f780 (rn-01aa9e67a70b: fabricated video/rtx cite, wrong ScreenSharePresets, unsourced figures, thin section 6). Fix: Implement - Sonnet rn-421012368992, then Review - Gemini.
