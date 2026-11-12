@@ -120,3 +120,10 @@ first deploy, Element X phone check with 3 friends.
 - Restart is gated on VibeSquad idea-162 (worker context handoff; today only role=lead auto-hands off). Hub9 will `vs send` when it merges.
 - Restart rules until then: spawn fresh workers with a brief (do not resume the old sessions), keep units small,
   and the lead re-spawns any worker that passes ~150k. Split B4 into B4a (STREAMING.md research) then B4b (golive page).
+- 2026-11-12: P1 resumed after the VS restart (f736924). State at Overlord handoff (~04:45Z):
+  - B1: built (87a1cba, 6820b9f; validate 9/9). Review FAIL: `TUWUNEL_GLOBAL__*` env prefix ignored, `node_ip: ${MESH_IP}` not expanded by LiveKit. Fix worker rn-fc24dcd7f7a3 (DSP) running. Next: re-review with Review - Gemini.
+  - B2: built (e32c9d3, 37c8a44; 6/6). Review FAIL: MSC2545 schema, key-order idempotency, call-room type + rtc.member PLs, UIA + restricted joins, MXID parsing, onboarding order. Fix worker rn-5322c4bd6bdf (DSP) running. Next: re-review.
+  - B3: built (989c09b..0182948; 23/23). Review rn-f21f44720333 (Gemini) running.
+  - B4a: Gemini worker died on API EOF; Sonnet worker rn-c6da1b38ae74 (failed over to Gemini under the Claude cap) running. Then B4b golive page from STREAMING.md section 6.
+  - Merge order once each review passes: B1, B2, B3, B4 into dev; write CREDITS.md from the workers' credits lines.
+  - Claude capped until 07:00Z: new Claude spawns queue on Gemini (3 concurrent). Prefer Work Order - DSP for clear-scope fixes.
