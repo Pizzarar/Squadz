@@ -118,3 +118,37 @@ describe('/sfu/get', () => {
     await assert.rejects(fetchSfuToken({ livekitServiceUrl: 'u', roomId: '!r:c', openIdToken: {}, deviceId: 'D', fetchImpl: async () => json(200, {}) }), /invalid/);
   });
 });
+
+describe('publish / stats / cleanup (mocks)', () => {
+  const mkStream = () => ({ getVideoTracks: () => [{ addEventListener() {} }], getAudioTracks: () => [] });
+  it('videoStats takes the first VideoSenderStats element, prefers currentBitrate', async () => {
+    const { videoStats } = await import('../lib/publish.mjs');
+    const mk = (cur) => ({ localParticipant: { videoTrackPublications: new Map([['a', { track: { currentBitrate: cur, getSenderStats: async () => [{ targetBitrate: 5e6, framesPerSecond: 60, frameWidth: 1920, frameHeight: 1080 }, { frameWidth: 640 }] } }]]) } });
+    assert.deepEqual(await videoStats(mk(4e6)), { bitrate: 4e6, fps: 60, w: 1920, h: 1080 });
+    assert.equal((await videoStats(mk(0))).bitrate, 5e6);
+    const empty = { localParticipant: { videoTrackPublications: new Map([['a', { track: { getSenderStats: async () => [] } }]]) } };
+    assert.equal(await videoStats(empty), null);
+  });
+  it('publish disconnects the room and rethrows when publishTrack fails', async () => {
+    const { publish } = await import('../lib/publish.mjs');
+    let disconnected = 0;
+    class FakeRoom {
+      localParticipant = { publishTrack: async () => { throw new Error('boom'); } };
+      async connect() {}
+      async disconnect() { disconnected++; }
+      on() {}
+    }
+    await assert.rejects(publish({ url: 'u', jwt: 'j', stream: mkStream(), preset: '1080p60', codec: 'vp9', RoomImpl: FakeRoom }), /boom/);
+    assert.equal(disconnected, 1);
+  });
+  it('clearCallMember sends keepalive only when asked', async () => {
+    const inits = [];
+    const f = async (_u, init) => { inits.push(init); return json(200, {}); };
+    const a = { homeserver: 'https://h', roomId: '!r:c', userId: '@a:c', deviceId: 'D', token: 't', fetchImpl: f };
+    await mx.clearCallMember(a);
+    await mx.clearCallMember({ ...a, keepalive: true });
+    assert.equal(inits[0].keepalive, undefined);
+    assert.equal(inits[1].keepalive, true);
+    assert.equal(inits[1].body, '{}');
+  });
+});
