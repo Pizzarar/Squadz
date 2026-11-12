@@ -1,15 +1,15 @@
 # Squadz · LiveKit SFU Configuration
 # Docs: https://docs.livekit.io/home/self-hosting/deployment/
-# Note: LiveKit's YAML loader does not expand ${ENV} placeholders natively.
-# Keep `rtc.node_ip: ${MESH_IP}` here as the declarative config contract, and pass
-# `--node-ip ${MESH_IP}` plus `LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}`
-# via docker-compose.yml so Docker Compose expands them at container startup.
+# Note: LiveKit's YAML loader (gopkg.in/yaml.v3) does not interpolate environment
+# variables, so `rtc.node_ip` is intentionally not set here. The mesh IP is passed
+# at runtime via the `--node-ip` CLI flag (set to the MESH_IP value) in
+# docker-compose.yml, where Docker Compose expands it at container startup.
+# API keys are likewise injected via the LIVEKIT_KEYS environment variable.
 
 port: 7880
 log_level: info
 
 rtc:
-  node_ip: ${MESH_IP}
   use_external_ip: false
   tcp_port: 7881
   port_range_start: 50000

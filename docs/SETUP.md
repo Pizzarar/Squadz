@@ -170,7 +170,7 @@ When a user joins a call, `lk-jwt-service` verifies their Matrix OpenID token by
 
 - **Tuwunel** (`ghcr.io/matrix-construct/tuwunel:v1.5.1`):
   - Repository & Releases: <https://github.com/matrix-construct/tuwunel/releases>
-  - Configuration (`tuwunel.toml`, `[global.well_known]`, `TUWUNEL_GLOBAL__*` env overrides): <https://github.com/matrix-construct/tuwunel>
+  - Configuration (`tuwunel.toml`, `[global.well_known]`, `TUWUNEL_*` env overrides): <https://github.com/matrix-construct/tuwunel>
 - **LiveKit Server** (`livekit/livekit-server:v1.9.12`):
   - Repository & Releases: <https://github.com/livekit/livekit/releases>
   - Self-hosting & Configuration (`rtc.node_ip`, `use_external_ip`, `port_range_start`/`end`, `tcp_port`, `LIVEKIT_KEYS`): <https://docs.livekit.io/home/self-hosting/deployment/>

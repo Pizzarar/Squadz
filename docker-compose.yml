@@ -36,16 +36,16 @@ services:
     restart: unless-stopped
     environment:
       TUWUNEL_CONFIG: "/etc/tuwunel/tuwunel.toml"
-      TUWUNEL_GLOBAL__SERVER_NAME: "${CHAT_FQDN}"
-      TUWUNEL_GLOBAL__DATABASE_PATH: "/var/lib/tuwunel"
-      TUWUNEL_GLOBAL__ADDRESS: '["0.0.0.0", "::"]'
-      TUWUNEL_GLOBAL__PORT: "6167"
-      TUWUNEL_GLOBAL__ALLOW_FEDERATION: "false"
-      TUWUNEL_GLOBAL__ALLOW_REGISTRATION: "true"
-      TUWUNEL_GLOBAL__REGISTRATION_TOKEN: "${TUWUNEL_REGISTRATION_TOKEN}"
-      TUWUNEL_GLOBAL__WELL_KNOWN__CLIENT: "https://${CHAT_FQDN}"
-      TUWUNEL_GLOBAL__WELL_KNOWN__SERVER: "${CHAT_FQDN}:443"
-      TUWUNEL_GLOBAL__WELL_KNOWN__LIVEKIT_URL: "https://${RTC_FQDN}/livekit/jwt"
+      TUWUNEL_SERVER_NAME: "${CHAT_FQDN}"
+      TUWUNEL_DATABASE_PATH: "/var/lib/tuwunel"
+      TUWUNEL_ADDRESS: '["0.0.0.0", "::"]'
+      TUWUNEL_PORT: "6167"
+      TUWUNEL_ALLOW_FEDERATION: "false"
+      TUWUNEL_ALLOW_REGISTRATION: "true"
+      TUWUNEL_REGISTRATION_TOKEN: "${TUWUNEL_REGISTRATION_TOKEN}"
+      TUWUNEL_WELL_KNOWN__CLIENT: "https://${CHAT_FQDN}"
+      TUWUNEL_WELL_KNOWN__SERVER: "${CHAT_FQDN}:443"
+      TUWUNEL_WELL_KNOWN__LIVEKIT_URL: "https://${RTC_FQDN}/livekit/jwt"
     volumes:
       - ./config/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
       - tuwunel_data:/var/lib/tuwunel

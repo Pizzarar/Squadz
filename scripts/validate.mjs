@@ -359,12 +359,36 @@ check('Tuwunel, LiveKit, lk-jwt-service, and soundboard configs match contract',
   assert(tuwunelToml.includes('[global.well_known]'), 'tuwunel.toml must include [global.well_known]');
   assert(tuwunelToml.includes('livekit_url'), 'tuwunel.toml must configure well_known.livekit_url');
 
+  const tuwunelEnv = compose.services.tuwunel.environment;
+  assert(tuwunelEnv, 'tuwunel service must define environment variables');
+  for (const key of Object.keys(tuwunelEnv)) {
+    assert(
+      !key.startsWith('TUWUNEL_GLOBAL__'),
+      `tuwunel env uses wrong prefix "${key}" (use TUWUNEL_<key>, no GLOBAL__ segment)`
+    );
+  }
+  assert(tuwunelEnv.TUWUNEL_SERVER_NAME === '${CHAT_FQDN}', 'tuwunel must receive TUWUNEL_SERVER_NAME=${CHAT_FQDN}');
+  assert(
+    tuwunelEnv.TUWUNEL_WELL_KNOWN__CLIENT === 'https://${CHAT_FQDN}',
+    'tuwunel must receive TUWUNEL_WELL_KNOWN__CLIENT=https://${CHAT_FQDN}'
+  );
+  assert(
+    tuwunelEnv.TUWUNEL_REGISTRATION_TOKEN === '${TUWUNEL_REGISTRATION_TOKEN}',
+    'tuwunel must receive TUWUNEL_REGISTRATION_TOKEN=${TUWUNEL_REGISTRATION_TOKEN}'
+  );
+
   const livekitYaml = readFileRel('config/livekit.yaml');
-  assert(livekitYaml.includes('node_ip: ${MESH_IP}'), 'livekit.yaml must specify rtc.node_ip: ${MESH_IP}');
+  assert(
+    !/\$\{[A-Z0-9_]+\}/.test(livekitYaml),
+    'livekit.yaml must not contain ${VAR} placeholders (LiveKit does not expand env vars in YAML)'
+  );
   assert(livekitYaml.includes('use_external_ip: false'), 'livekit.yaml must specify use_external_ip: false');
   assert(livekitYaml.includes('port_range_start: 50000'), 'livekit.yaml must specify port_range_start: 50000');
   assert(livekitYaml.includes('port_range_end: 50100'), 'livekit.yaml must specify port_range_end: 50100');
   assert(livekitYaml.includes('tcp_port: 7881'), 'livekit.yaml must specify tcp_port: 7881');
+  const lkCommand = compose.services.livekit.command;
+  assert(lkCommand.includes('--node-ip'), 'livekit command must pass --node-ip');
+  assert(lkCommand.includes('${MESH_IP}'), 'livekit command must pass --node-ip ${MESH_IP}');
 
   const lkJwtEnv = compose.services['lk-jwt-service'].environment;
   assert(
