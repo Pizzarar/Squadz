@@ -116,4 +116,7 @@ Integration review, CI run on GitHub (needs push approval), Aub provisioning (do
 first deploy, Element X phone check with 3 friends.
 
 ## In flight
-- (lead fills in)
+- 2026-11-09: P1 PAUSED by Aub. All four workers stopped; worktrees kept (b3, b4 have 1 uncommitted file each, nothing committed).
+- Restart is gated on VibeSquad idea-162 (worker context handoff; today only role=lead auto-hands off). Hub9 will `vs send` when it merges.
+- Restart rules until then: spawn fresh workers with a brief (do not resume the old sessions), keep units small,
+  and the lead re-spawns any worker that passes ~150k. Split B4 into B4a (STREAMING.md research) then B4b (golive page).
