@@ -4,13 +4,13 @@ Plays short audio clips (`.mp3`, `.ogg`, `.wav`) from `/clips` into active Matri
 
 ## Commands
 
-Send in any Matrix room the bot is invited to:
+Send in **#clips** (the unencrypted room of the Squadz Space; commands in any other room are ignored, so the bot never needs E2EE):
 
 - `!sb` or `!sb list` — list available clip names from `/clips`
-- `!sb play <clip>` — join the room's active MatrixRTC call (if one is ongoing), decode `<clip>` to 48 kHz mono PCM via `ffmpeg`, publish it to LiveKit, and leave after the idle timeout
-- `!sb stop` — stop the currently playing clip immediately
+- `!sb play <clip> [in <room>]` — play `<clip>` into a voice room's MatrixRTC call. The target is the room named after `in` (display name or alias, e.g. `in game night`), else the single voice room in the Space with an active call, else the bot asks which room you mean.
+- `!sb stop [in <room>]` — stop playback immediately (all rooms, or just the named one)
 
-The bot **only joins a LiveKit call when `!sb play <clip>` is run and at least one human participant has an active MatrixRTC membership in the room**. When the idle timeout expires (default `60s`) or the bot shuts down, it disconnects from LiveKit and posts an empty `{}` state event to remove its `org.matrix.msc3401.call.member` state.
+Playback runs in the background, so `stop` works mid-clip; one clip plays per voice room at a time (a new `play` preempts the old one) and stopping/shutdown kills the ffmpeg decode. The bot only joins when a human has an active MatrixRTC membership. It refreshes its `call.member` `expires` (keeping `created_ts`) while connected, cleans up if the SFU drops the connection, and after the idle timeout (default `60s`) or on shutdown disconnects and posts `{}` to clear its `org.matrix.msc3401.call.member` state. `room` sent to lk-jwt-service `/sfu/get` is the Matrix room ID.
 
 ## Environment Variables (Contract)
 
