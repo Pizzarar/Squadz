@@ -126,6 +126,17 @@ export class MatrixClient {
   }
 
   /**
+   * Resolve a room alias (`#clips:chat.example.com`) to a room ID via the directory API.
+   */
+  async resolveAlias(alias) {
+    const data = await this._request(
+      'GET',
+      `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`
+    );
+    return data.room_id;
+  }
+
+  /**
    * Fetch all current state events in `roomId`.
    */
   async getRoomState(roomId) {
