@@ -132,3 +132,6 @@ first deploy, Element X phone check with 3 friends.
   - B2: re-review PASS 0/0/0 d6de57d (rn-1cc85701737f; AGREE on MSC3417 rejection). MERGED into dev, 13/13 on dev.
   - B3: fix done 211ced0 (38/38, rn-fc31f24b2be2). Re-review: Review - Gemini rn-f25668f736f1.
   - B4a: review FAIL 1/4/3 f89f780 (rn-01aa9e67a70b: fabricated video/rtx cite, wrong ScreenSharePresets, unsourced figures, thin section 6). Fix: Implement - Sonnet rn-421012368992, then Review - Gemini.
+  - B3: re-review PASS 0/0/0 211ced0 (rn-f25668f736f1). MERGED into dev, 38/38 on dev.
+  - B4a: fix done ecbc23a (rn-421012368992). Re-review: Review - Gemini rn-e78c810da439. On PASS: merge, then B4b golive page.
+  - CREDITS.md written on dev.
