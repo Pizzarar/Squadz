@@ -1,0 +1,13 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; }
+body { margin: 0; background: #14161a; color: #e6e8eb; }
+main { max-width: 56rem; margin: 0 auto; padding: 1rem; }
+label { display: block; margin: .6rem 0; }
+input, select, button { font: inherit; padding: .4rem .6rem; margin-top: .2rem; }
+input:not([type=radio]), select { width: 100%; box-sizing: border-box; }
+button { cursor: pointer; margin-right: .5rem; }
+.error { background: #4a1d1d; border: 1px solid #a33; padding: .6rem; border-radius: .3rem; }
+[hidden] { display: none !important; }
+#preview { width: 100%; max-height: 60vh; background: #000; }
+#grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .75rem; }
+.tile video { width: 100%; background: #000; }
+.tile label { margin: .2rem 0; }

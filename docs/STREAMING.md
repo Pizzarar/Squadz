@@ -201,7 +201,7 @@ web/golive/
 Pure logic (`presets`, `matrix`, `lkjwt`, `callMemberContent`) must not touch `window`/`document` so `node --test` can run it with an injected `fetch`.
 
 ### UI states
-1. `login` (homeserver fixed to `https://<CHAT_FQDN>`; username, password, room) → error text on failure.
+1. `login` (homeserver defaults to `window.location.origin` since the page is served static from `https://<CHAT_FQDN>/golive/`; username, password; room selector defaults to `#game-night:<server_name>`, also `#lounge`, plus a paste field) → error text on failure.
 2. `lobby` (mode toggle **Stream / Watch**; preset select `1080p60|1440p60|1080p30`; codec select `vp9|av1|h264`; "Test capture").
 3. `streaming` (local preview `<video muted>`, stats: width×height, fps, bitrate from `getStats`, audio-track present yes/no, Stop button).
 4. `watching` (grid of remote video elements, per-stream volume, Leave button).
@@ -212,7 +212,8 @@ Source of the shape: working copy in `unit/b3` `bots/soundboard/src/matrixrtc.js
 1. `POST /_matrix/client/v3/login` `{ type: "m.login.password", identifier: { type: "m.id.user", user }, password, initial_device_display_name: "Squadz Go-Live" }` → `{ access_token, user_id, device_id }`.
 2. Room: accept a roomId (`!…:<CHAT_FQDN>`) or an alias. **An alias cannot contain a space**, so `#Game Night:…` is invalid; use the alias the seed created (the exact slug is set by B2 `bootstrap.mjs`, not confirmed here `[unverified]`), e.g. `#game-night:<CHAT_FQDN>`, via `GET /_matrix/client/v3/directory/room/{url-encoded alias}` → `{ room_id }`. Let the user also paste a roomId directly.
 3. `POST /_matrix/client/v3/user/{user_id}/openid/request_token` body `{}` → `{ access_token, token_type, matrix_server_name, expires_in }`.
-4. `POST https://<RTC_FQDN>/livekit/jwt/sfu/get`, `Content-Type: application/json`, body
+3b. Resolve the service URL at runtime: `GET <homeserver>/.well-known/matrix/client` → `org.matrix.msc4143.rtc_foci[type=livekit].livekit_service_url` (no build-time FQDN templating; Caddy serves this doc).
+4. `POST <livekit_service_url>/sfu/get` (i.e. `https://<RTC_FQDN>/livekit/jwt/sfu/get`), `Content-Type: application/json`, body
    `{ "room": "<Matrix roomId>", "openid_token": <step-3 object, verbatim>, "device_id": "<device_id>" }` → `{ url, jwt }`.
    - Compose pins `ghcr.io/element-hq/lk-jwt-service:0.4.4` (`dev:docker-compose.yml:70`). `room` must be the **Matrix roomId, not an alias** (lead note: 0.4.4 hashes it).
    - Source read for the identity/room mapping (a summary of `main.go` at tag `v0.4.4`, not the raw file read by me): legacy `/sfu/get` builds the LiveKit identity as `<user_id>:<device_id>` and the LiveKit room name as SHA-256 (unpadded base64) of `["<room>", "m.call#ROOM"]`. Treat `[unverified]` until confirmed against the running container; B4b's mock test should only assert the request body, not the hashing.
@@ -225,7 +226,8 @@ already used by the B3 bot (`unit/b3` `bots/soundboard/src/matrixrtc.js`, `build
 - `state_key`: `_<user_id>_<device_id>_m.call`
 - content: `{ application: "m.call", call_id: "", scope: "m.room", device_id, expires: 14400000 (4 h, refresh before expiry), created_ts: <ms>, focus_active: { type: "livekit", focus_selection: "oldest_membership" }, foci_preferred: [ { type: "livekit", livekit_service_url: "https://<RTC_FQDN>/livekit/jwt", livekit_alias: "<roomId>" } ] }`
   (note the field is spelled `focus_active` in b3 code; the key the task text calls `foci_active` was not confirmed in either spelling in a spec `[unverified]`; follow b3 unless the Element Call interop test shows otherwise).
-- On Stop/disconnect, `PUT` the same state_key with `{}` to leave.
+- On Stop/disconnect, `PUT` the same state_key with `{}` to leave. The page re-PUTs every 3 h (before the 4 h expiry). A 403 / `M_FORBIDDEN` on this PUT is shown as a clear "no permission to start a call in this room" error and aborts the stream (build addition: `friendlyStateError`).
+- `lib/*` tests assert byte-for-byte parity with `bots/soundboard/src/matrixrtc.js` (`buildCallMemberContent`, `fetchLiveKitJwt` request).
 - **Interop risk `[unverified]`:** whether Element Call shows a screen-share tile from a publisher that is not Element Call itself (track source `screen_share`, participant identity format) is untested; Viewer Mode in Go-Live is the guaranteed fallback. Record the result of the first real test in this doc.
 
 ### Capture (`lib/capture.mjs`)

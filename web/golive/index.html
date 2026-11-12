@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Squadz Go-Live</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <h1>Squadz Go-Live</h1>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <section id="view-login" data-view="login">
+      <label>Homeserver <input id="homeserver" type="url" autocomplete="off"></label>
+      <label>Username <input id="username" autocomplete="username"></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+      <button id="btn-login">Log in</button>
+    </section>
+
+    <section id="view-lobby" data-view="lobby" hidden>
+      <p>Signed in as <strong id="who"></strong></p>
+      <label>Room
+        <select id="room-select"></select>
+      </label>
+      <label>Or paste a room id / alias <input id="room-custom" placeholder="!id:server or #alias:server"></label>
+      <fieldset>
+        <legend>Mode</legend>
+        <label><input type="radio" name="mode" value="stream" checked> Stream</label>
+        <label><input type="radio" name="mode" value="watch"> Watch</label>
+      </fieldset>
+      <div id="stream-opts">
+        <label>Preset
+          <select id="preset">
+            <option value="1080p60">1080p60</option>
+            <option value="1440p60">1440p60</option>
+            <option value="1080p30">1080p30</option>
+          </select>
+        </label>
+        <label>Codec
+          <select id="codec">
+            <option value="vp9">VP9</option>
+            <option value="av1">AV1</option>
+            <option value="h264">H.264</option>
+          </select>
+        </label>
+        <button id="btn-test">Test capture</button>
+        <p id="test-result"></p>
+      </div>
+      <button id="btn-go">Go</button>
+    </section>
+
+    <section id="view-streaming" data-view="streaming" hidden>
+      <video id="preview" muted autoplay playsinline></video>
+      <ul id="stats">
+        <li>Resolution: <span id="st-res">-</span></li>
+        <li>FPS: <span id="st-fps">-</span></li>
+        <li>Bitrate: <span id="st-br">-</span></li>
+        <li>Audio track: <span id="st-audio">-</span></li>
+      </ul>
+      <button id="btn-stop">Stop</button>
+    </section>
+
+    <section id="view-watching" data-view="watching" hidden>
+      <div id="grid"></div>
+      <button id="btn-leave">Leave</button>
+    </section>
+  </main>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>
