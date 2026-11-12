@@ -76,6 +76,8 @@ $('btn-go').onclick = guard(async () => {
     s.room = await publish({ url, jwt, stream: cap.stream, preset, codec, onEnded: () => { if (s.room) guard(endStream)(); } });
   } catch (e) {
     cap.stream.getTracks().forEach((t) => t.stop());
+    s.stream = s.room = null;
+    try { await clearCallMember(memberArgs()); } catch { /* may never have been sent */ }
     throw e;
   }
   $('preview').srcObject = cap.stream;
@@ -118,7 +120,7 @@ async function startWatching() {
       track.detach().forEach((e) => e.remove());
       grid.querySelector(`[data-sid="${track.sid}"]`)?.remove();
     },
-    onEnded: () => { if (s.room) show('lobby'); },
+    onEnded: () => { if (s.room) { s.room = null; $('grid').replaceChildren(); show('lobby'); } },
   });
   show('watching'); // viewers never send call.member
 }
@@ -130,5 +132,12 @@ $('btn-leave').onclick = guard(async () => {
   show('lobby');
 });
 
-window.addEventListener('pagehide', () => { if (s.stream && s.session) { s.stream.getTracks().forEach((t) => t.stop()); } });
+window.addEventListener('pagehide', () => {
+  clearTimers();
+  const { room, stream } = s;
+  s.room = s.stream = null;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  if (stream && s.session && s.roomId) clearCallMember({ ...memberArgs(), keepalive: true }).catch(() => {});
+  if (room) room.disconnect();
+});
 show('login');
