@@ -1,0 +1,37 @@
+# Squadz · Tuwunel Matrix Homeserver Configuration
+# Docs: https://github.com/matrix-construct/tuwunel
+# Dynamic values (server_name, registration_token, well_known URLs) are injected
+# via TUWUNEL_* environment variables in docker-compose.yml.
+
+[global]
+# Placeholder overridden at runtime by TUWUNEL_SERVER_NAME=${CHAT_FQDN}
+server_name = "chat.example.com"
+
+# Listen inside the container on all interfaces, port 6167
+address = ["0.0.0.0", "::"]
+port = 6167
+
+# RocksDB storage path (mounted to the tuwunel_data Docker volume)
+database_path = "/var/lib/tuwunel"
+
+# Private server: disable public Matrix federation
+allow_federation = false
+
+# Token-gated registration: require TUWUNEL_REGISTRATION_TOKEN to sign up
+allow_registration = true
+# Overridden at runtime by TUWUNEL_REGISTRATION_TOKEN=${TUWUNEL_REGISTRATION_TOKEN}
+registration_token = "replace_via_env"
+
+# Allow up to 50 MB uploads for clips, custom emoji packs, and room media
+max_request_size = 52_428_800
+
+# No external key servers needed when federation is off
+trusted_servers = []
+
+[global.well_known]
+# Native well-known & MatrixRTC transports (MSC4143)
+# Overridden at runtime by TUWUNEL_WELL_KNOWN__CLIENT and TUWUNEL_WELL_KNOWN__LIVEKIT_URL
+# (Caddy also serves /.well-known/matrix/client directly at the edge)
+client = "https://chat.example.com"
+server = "chat.example.com:443"
+livekit_url = "https://rtc.example.com/livekit/jwt"

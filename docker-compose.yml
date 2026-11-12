@@ -1,0 +1,111 @@
+# Squadz · Self-hosted private Matrix + MatrixRTC stack ("where squadz meet")
+# Every ${VAR} referenced below is defined in .env.example.
+# All published ports bind strictly to ${MESH_IP} (NordVPN Meshnet or Tailscale CGNAT IP).
+
+services:
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    image: squadz-caddy:2.9.1
+    restart: unless-stopped
+    ports:
+      - "${MESH_IP}:443:443/tcp"
+      - "${MESH_IP}:443:443/udp"
+    environment:
+      SQUADZ_DOMAIN: "${SQUADZ_DOMAIN}"
+      CHAT_FQDN: "${CHAT_FQDN}"
+      RTC_FQDN: "${RTC_FQDN}"
+      ACME_EMAIL: "${ACME_EMAIL}"
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN}"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web/golive:/srv/golive:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "${CHAT_FQDN}:${MESH_IP}"
+      - "${RTC_FQDN}:${MESH_IP}"
+    depends_on:
+      - tuwunel
+      - livekit
+      - lk-jwt-service
+
+  tuwunel:
+    image: ghcr.io/matrix-construct/tuwunel:v1.5.1
+    restart: unless-stopped
+    environment:
+      TUWUNEL_CONFIG: "/etc/tuwunel/tuwunel.toml"
+      TUWUNEL_SERVER_NAME: "${CHAT_FQDN}"
+      TUWUNEL_DATABASE_PATH: "/var/lib/tuwunel"
+      TUWUNEL_ADDRESS: '["0.0.0.0", "::"]'
+      TUWUNEL_PORT: "6167"
+      TUWUNEL_ALLOW_FEDERATION: "false"
+      TUWUNEL_ALLOW_REGISTRATION: "true"
+      TUWUNEL_REGISTRATION_TOKEN: "${TUWUNEL_REGISTRATION_TOKEN}"
+      TUWUNEL_WELL_KNOWN__CLIENT: "https://${CHAT_FQDN}"
+      TUWUNEL_WELL_KNOWN__SERVER: "${CHAT_FQDN}:443"
+      TUWUNEL_WELL_KNOWN__LIVEKIT_URL: "https://${RTC_FQDN}/livekit/jwt"
+    volumes:
+      - ./config/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
+      - tuwunel_data:/var/lib/tuwunel
+
+  livekit:
+    image: livekit/livekit-server:v1.9.12
+    restart: unless-stopped
+    command:
+      - "--config"
+      - "/etc/livekit.yaml"
+      - "--node-ip"
+      - "${MESH_IP}"
+    ports:
+      - "${MESH_IP}:7881:7881/tcp"
+      - "${MESH_IP}:50000-50100:50000-50100/udp"
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./config/livekit.yaml:/etc/livekit.yaml:ro
+
+  lk-jwt-service:
+    image: ghcr.io/element-hq/lk-jwt-service:0.4.4
+    restart: unless-stopped
+    environment:
+      LIVEKIT_JWT_BIND: ":8080"
+      LIVEKIT_URL: "wss://${RTC_FQDN}/livekit/sfu"
+      LIVEKIT_KEY: "${LIVEKIT_API_KEY}"
+      LIVEKIT_SECRET: "${LIVEKIT_API_SECRET}"
+      LIVEKIT_FULL_ACCESS_HOMESERVERS: "${CHAT_FQDN}"
+    extra_hosts:
+      - "${CHAT_FQDN}:${MESH_IP}"
+      - "${RTC_FQDN}:${MESH_IP}"
+    depends_on:
+      - livekit
+      - tuwunel
+
+  soundboard:
+    profiles:
+      - bots
+    build: ./bots/soundboard
+    image: squadz-soundboard:0.1.0
+    restart: unless-stopped
+    environment:
+      CHAT_FQDN: "${CHAT_FQDN}"
+      RTC_FQDN: "${RTC_FQDN}"
+      SOUNDBOARD_MATRIX_USER: "${SOUNDBOARD_MATRIX_USER}"
+      SOUNDBOARD_MATRIX_PASSWORD: "${SOUNDBOARD_MATRIX_PASSWORD}"
+      SOUNDBOARD_CLIPS_DIR: "/clips"
+    volumes:
+      - "${SOUNDBOARD_CLIPS_DIR}:/clips:ro"
+    extra_hosts:
+      - "${CHAT_FQDN}:${MESH_IP}"
+      - "${RTC_FQDN}:${MESH_IP}"
+    depends_on:
+      - caddy
+      - tuwunel
+      - livekit
+      - lk-jwt-service
+
+volumes:
+  caddy_data:
+  caddy_config:
+  tuwunel_data:

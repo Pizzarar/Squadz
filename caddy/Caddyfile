@@ -1,0 +1,71 @@
+{
+	email {$ACME_EMAIL}
+	# Mesh-only stack: disable port 80 HTTP->HTTPS redirects; ACME uses DNS-01 exclusively
+	auto_https disable_redirects
+}
+
+(dns_tls) {
+	tls {
+		dns cloudflare {$CLOUDFLARE_API_TOKEN}
+	}
+}
+
+https://{$CHAT_FQDN} {
+	import dns_tls
+
+	# Matrix client discovery + MatrixRTC LiveKit focus (MSC4143)
+	handle /.well-known/matrix/client {
+		header Content-Type application/json
+		header Access-Control-Allow-Origin *
+		header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+		respond `{"m.homeserver":{"base_url":"https://{$CHAT_FQDN}"},"org.matrix.msc4143.rtc_foci":[{"type":"livekit","livekit_service_url":"https://{$RTC_FQDN}/livekit/jwt"}]}` 200
+	}
+
+	# Matrix server discovery (local OpenID resolution for lk-jwt-service)
+	handle /.well-known/matrix/server {
+		header Content-Type application/json
+		respond `{"m.server":"{$CHAT_FQDN}:443"}` 200
+	}
+
+	# Matrix Client-Server & Federation OpenID APIs -> Tuwunel
+	handle /_matrix/* {
+		reverse_proxy tuwunel:6167
+	}
+
+	# Go-live high-FPS screen-share web app (Block B4)
+	handle /golive {
+		redir /golive/ 308
+	}
+	handle_path /golive/* {
+		root * /srv/golive
+		file_server
+	}
+}
+
+https://{$RTC_FQDN} {
+	import dns_tls
+
+	# CORS preflight for MatrixRTC clients (Element Call, Element X, Go-live)
+	@cors_preflight method OPTIONS
+	handle @cors_preflight {
+		header Access-Control-Allow-Origin *
+		header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+		header Access-Control-Max-Age 86400
+		respond "" 204
+	}
+
+	# MatrixRTC LiveKit JWT authorization service (prefix stripped)
+	handle_path /livekit/jwt/* {
+		header Access-Control-Allow-Origin *
+		header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+		reverse_proxy lk-jwt-service:8080
+	}
+
+	# LiveKit SFU WebSocket & HTTP signaling (prefix stripped)
+	handle_path /livekit/sfu/* {
+		reverse_proxy livekit:7880
+	}
+}
