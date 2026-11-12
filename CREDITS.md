@@ -14,4 +14,5 @@ Squadz is glue around these open-source projects. Nothing here is copied code un
 - Implemented call rooms and `call.member` events (MSC3401/MSC4143/MSC4196) — Thanks to MatrixRTC by the Matrix.org community
 - Implemented soundboard bot session handling (protocol checked, no code copied) — Thanks to matrix-js-sdk by matrix-org, lk-jwt-service by element-hq and node-sdks by LiveKit
 - Implemented screen-share presets, publish options and audio presets reference — Thanks to client-sdk-js by LiveKit
+- Implemented Go-Live screen-share publish (vendored livekit-client 2.23.0, unmodified, Apache-2.0) — Thanks to livekit-client (client-sdk-js) by LiveKit
 - Implemented `getDisplayMedia` hint notes — Thanks to MDN Web Docs by Mozilla contributors

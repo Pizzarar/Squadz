@@ -137,3 +137,5 @@ first deploy, Element X phone check with 3 friends.
   - CREDITS.md written on dev.
   - B4a: re-review PASS 0/0/2 ecbc23a (rn-e78c810da439). MERGED into dev (3e932d7). The 2 lows (static-page FQDN discovery via well-known; default room + call.member PL error) are folded into B4b.
   - B4b: golive page, Implement - Sonnet rn-511356aeb7ff on unit/b4 (merges dev first). Then Review - Gemini, merge, and P1 is code-complete pending the owner's deploy inputs.
+  - B4b: built 12a8335; review FAIL 0/2/1 (getSenderStats array, call.member/SFU leak on failure + pagehide, viewer reset). Fixed b55f105; re-review PASS 0/0/0 b55f105 (rn-1896a9ba65fa). MERGED into dev; validate 9/9, golive 19/19 on dev.
+  - P1 CODE-COMPLETE on dev. Remaining: owner inputs (push OK, domain + Cloudflare token, host, Meshnet vs Tailscale, friends' usernames), then deploy + on-device checks: Element Call viewer sees the Go-Live tile, system audio per OS, 1080p60/1440p60 reach target fps/bitrate, CORS chat->rtc for /sfu/get, lk-jwt room hashing against the live container, Element X mobile voice.
