@@ -1,0 +1,10 @@
+{
+  "name": "squadz-golive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Squadz Go-Live: static screen-share page (livekit-client 2.23.0 vendored)",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test" },
+  "vendoredDependencies": { "livekit-client": "2.23.0" }
+}
