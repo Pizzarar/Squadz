@@ -46,11 +46,12 @@ export async function resolveLivekitServiceUrl(homeserver, fetchImpl = globalThi
   return pickLivekitServiceUrl(await res.json());
 }
 
-async function mx(fetchImpl, homeserver, path, { method = 'GET', token, body } = {}) {
+async function mx(fetchImpl, homeserver, path, { method = 'GET', token, body, keepalive } = {}) {
   const res = await fetchImpl(`${trim(homeserver)}/_matrix/client/v3${path}`, {
     method,
     headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(keepalive ? { keepalive: true } : {}),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -89,10 +90,10 @@ export function friendlyStateError(err) {
   return err && err.message ? err.message : String(err);
 }
 
-async function putState(homeserver, roomId, userId, deviceId, token, content, fetchImpl) {
+async function putState(homeserver, roomId, userId, deviceId, token, content, fetchImpl, keepalive = false) {
   const key = buildCallMemberStateKey(userId, deviceId);
   try {
-    await mx(fetchImpl, homeserver, `/rooms/${encodeURIComponent(roomId)}/state/${CALL_MEMBER_EVENT_TYPE}/${encodeURIComponent(key)}`, { method: 'PUT', token, body: content });
+    await mx(fetchImpl, homeserver, `/rooms/${encodeURIComponent(roomId)}/state/${CALL_MEMBER_EVENT_TYPE}/${encodeURIComponent(key)}`, { method: 'PUT', token, body: content, keepalive });
   } catch (e) {
     throw new Error(friendlyStateError(e));
   }
@@ -102,6 +103,6 @@ export function sendCallMember({ homeserver, roomId, userId, deviceId, token, li
   return putState(homeserver, roomId, userId, deviceId, token, buildCallMemberContent({ deviceId, roomId, livekitServiceUrl, createdTs }), fetchImpl);
 }
 
-export function clearCallMember({ homeserver, roomId, userId, deviceId, token, fetchImpl = globalThis.fetch }) {
-  return putState(homeserver, roomId, userId, deviceId, token, {}, fetchImpl);
+export function clearCallMember({ homeserver, roomId, userId, deviceId, token, fetchImpl = globalThis.fetch, keepalive = false }) {
+  return putState(homeserver, roomId, userId, deviceId, token, {}, fetchImpl, keepalive);
 }
