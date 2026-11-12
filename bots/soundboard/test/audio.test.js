@@ -14,6 +14,50 @@ import {
 } from '../src/audio.js';
 import { RoomCallSession } from '../src/livekit.js';
 
+describe('decodeClipToPcm abort', () => {
+  function fakeSpawn() {
+    const proc = new EventEmitter();
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    proc.killed = null;
+    proc.kill = (sig) => {
+      proc.killed = sig;
+    };
+    return { proc, spawnImpl: () => proc };
+  }
+
+  it('kills ffmpeg and rejects with AbortError when the signal aborts mid-decode', async () => {
+    const { proc, spawnImpl } = fakeSpawn();
+    const ac = new AbortController();
+    const p = decodeClipToPcm('x.wav', { spawnImpl, signal: ac.signal });
+    ac.abort();
+    await assert.rejects(p, { name: 'AbortError' });
+    assert.equal(proc.killed, 'SIGKILL');
+  });
+
+  it('does not spawn ffmpeg when already aborted', async () => {
+    let spawned = false;
+    const ac = new AbortController();
+    ac.abort();
+    await assert.rejects(
+      decodeClipToPcm('x.wav', { spawnImpl: () => ((spawned = true), null), signal: ac.signal }),
+      { name: 'AbortError' }
+    );
+    assert.equal(spawned, false);
+  });
+
+  it('ignores a late abort after a successful decode', async () => {
+    const { proc, spawnImpl } = fakeSpawn();
+    const ac = new AbortController();
+    const p = decodeClipToPcm('x.wav', { spawnImpl, signal: ac.signal });
+    proc.stdout.emit('data', Buffer.from([1, 0]));
+    proc.emit('close', 0);
+    assert.equal((await p).length, 2);
+    ac.abort();
+    assert.equal(proc.killed, null);
+  });
+});
+
 describe('PCM framing and ffmpeg decoding', () => {
   it('chunks 48 kHz mono s16le PCM into 960-sample (20 ms) Int16Array frames and zero-pads tail', () => {
     // 1 full frame (1920 bytes) + 4 bytes (2 samples) tail
