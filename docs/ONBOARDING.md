@@ -58,7 +58,9 @@ Once signed in:
    - **Memes** — memes
    - **Lounge** and **Game Night** — voice rooms (see below)
 
-> Rooms are invite-only, so join from the invites Aub sent you.
+> The rooms are **restricted** to Space members: once you've joined the Squadz
+> space you can enter any of its rooms directly — you don't need a separate
+> invite per room. (You only need the one invite to the Space.)
 
 ## 5. Start a voice call
 
@@ -75,11 +77,23 @@ Once signed in:
 
 ## 6. Use the custom emoji
 
-The space ships a small custom emoji pack. In any room:
+The space ships a small custom emoji pack, set in the Space and every text room.
+In any room:
 
 1. Open the emoji picker (the smiley next to the message box).
-2. Look under **custom emoji / space** for `:squadz:`, `:wave:`, `:party:`, `:gg:`.
+2. Look under **custom emoji** for `:squadz:`, `:wave:`, `:party:`, `:gg:`.
 3. Type `:squadz:` (or the start of a shortcode) to autocomplete.
+
+> Custom emoji are Matrix "image packs" (MSC2545). Support varies by client and
+> version:
+> - **Element desktop (Element Web)** shows the pack in the emoji picker and
+>   renders the emotes inline.
+> - **Element X** can send and display custom emoji from packs, but the feature
+>   is newer there and some builds only surface packs set directly in the room —
+>   which is why Squadz sets the pack in every text room, not just the Space.
+> - The pack still uses an unstable event type (`im.ponies.room_emotes`); the
+>   stable `m.room.image_pack` is not widely deployed yet. On a client that
+>   doesn't recognise the pack, the emote appears as an inline image instead.
 
 ## Troubleshooting
 
