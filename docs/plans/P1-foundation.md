@@ -135,3 +135,5 @@ first deploy, Element X phone check with 3 friends.
   - B3: re-review PASS 0/0/0 211ced0 (rn-f25668f736f1). MERGED into dev, 38/38 on dev.
   - B4a: fix done ecbc23a (rn-421012368992). Re-review: Review - Gemini rn-e78c810da439. On PASS: merge, then B4b golive page.
   - CREDITS.md written on dev.
+  - B4a: re-review PASS 0/0/2 ecbc23a (rn-e78c810da439). MERGED into dev (3e932d7). The 2 lows (static-page FQDN discovery via well-known; default room + call.member PL error) are folded into B4b.
+  - B4b: golive page, Implement - Sonnet rn-511356aeb7ff on unit/b4 (merges dev first). Then Review - Gemini, merge, and P1 is code-complete pending the owner's deploy inputs.
