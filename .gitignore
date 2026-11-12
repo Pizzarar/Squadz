@@ -1,0 +1,18 @@
+# Environment configuration (real secrets go here — never commit)
+.env
+.env.*
+!.env.example
+
+# Node dependencies and test output
+node_modules/
+npm-debug.log*
+*.tgz
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Runtime data volumes (if mounted locally)
+data/

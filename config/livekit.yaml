@@ -1,0 +1,26 @@
+# Squadz · LiveKit SFU Configuration
+# Docs: https://docs.livekit.io/home/self-hosting/deployment/
+# Note: LiveKit's YAML loader does not expand ${ENV} placeholders natively.
+# Keep `rtc.node_ip: ${MESH_IP}` here as the declarative config contract, and pass
+# `--node-ip ${MESH_IP}` plus `LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}`
+# via docker-compose.yml so Docker Compose expands them at container startup.
+
+port: 7880
+log_level: info
+
+rtc:
+  node_ip: ${MESH_IP}
+  use_external_ip: false
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+
+room:
+  # Auto-create rooms when authorized via lk-jwt-service
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 20
+
+turn:
+  # Disabled: all peers communicate directly over the L3 mesh (Meshnet / Tailscale)
+  enabled: false
