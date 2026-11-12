@@ -49,6 +49,7 @@ async function main() {
     matrix,
     rtcFqdn: cfg.rtcFqdn,
     clipsDir: cfg.clipsDir,
+    commandRoomAlias: `#clips:${cfg.chatFqdn}`,
     idleTimeoutMs: cfg.idleTimeoutMs,
   });
 

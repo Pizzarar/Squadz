@@ -1,15 +1,20 @@
 // SoundboardBot orchestrator: ties together Matrix sync/invites, command dispatch,
 // MatrixRTC call.member state management, lk-jwt-service token exchange, ffmpeg decoding,
 // and LiveKit audio publishing.
+//
+// Commands are read ONLY in the unencrypted #clips room. The voice rooms are E2EE, so the bot
+// never needs to read their timelines; it only reads their (unencrypted) state events.
 import { parseCommand } from './commands.js';
 import { ClipRegistry } from './clips.js';
 import {
+  DEFAULT_EXPIRES_MS,
   buildCallMemberContent,
   buildLeaveCallMemberContent,
   findActiveCallMemberships,
   fetchLiveKitJwt,
 } from './matrixrtc.js';
-import { decodeClipToPcm } from './audio.js';
+import { decodeClipToPcm, isAbortError, abortError } from './audio.js';
+import { resolveVoiceRoom } from './rooms.js';
 import { RoomCallSession, defaultRtcFactory } from './livekit.js';
 
 export class SoundboardBot {
@@ -18,7 +23,10 @@ export class SoundboardBot {
    * @param {import('./matrix.js').MatrixClient} opts.matrix
    * @param {string} opts.rtcFqdn
    * @param {string} opts.clipsDir
+   * @param {string} [opts.commandRoomId]     Room ID of #clips (the only room commands are read in)
+   * @param {string} [opts.commandRoomAlias]  e.g. `#clips:chat.example.com`, resolved lazily if no ID
    * @param {number} [opts.idleTimeoutMs=60000]
+   * @param {number} [opts.memberExpiresMs=DEFAULT_EXPIRES_MS]  call.member `expires`; refreshed at half this
    * @param {typeof decodeClipToPcm} [opts.decodeClip=decodeClipToPcm]
    * @param {() => Promise<object>} [opts.rtcFactory=defaultRtcFactory]
    * @param {typeof fetch} [opts.fetchImpl=fetch]
@@ -28,7 +36,10 @@ export class SoundboardBot {
     matrix,
     rtcFqdn,
     clipsDir,
+    commandRoomId = null,
+    commandRoomAlias = null,
     idleTimeoutMs = 60_000,
+    memberExpiresMs = DEFAULT_EXPIRES_MS,
     decodeClip = decodeClipToPcm,
     rtcFactory = defaultRtcFactory,
     fetchImpl = globalThis.fetch,
@@ -37,10 +48,16 @@ export class SoundboardBot {
     if (!matrix || !rtcFqdn || !clipsDir) {
       throw new Error('matrix, rtcFqdn, and clipsDir are required');
     }
+    if (!commandRoomId && !commandRoomAlias) {
+      throw new Error('commandRoomId or commandRoomAlias is required');
+    }
     this.matrix = matrix;
     this.rtcFqdn = rtcFqdn.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     this.clips = new ClipRegistry(clipsDir);
+    this.commandRoomId = commandRoomId;
+    this.commandRoomAlias = commandRoomAlias;
     this.idleTimeoutMs = idleTimeoutMs;
+    this.memberExpiresMs = memberExpiresMs;
     this.decodeClip = decodeClip;
     this.rtcFactory = rtcFactory;
     this.fetchImpl = fetchImpl;
@@ -48,17 +65,29 @@ export class SoundboardBot {
 
     /** @type {Map<string, RoomCallSession>} */
     this.sessions = new Map();
+    /** One active playback per voice room. @type {Map<string, { controller: AbortController, promise: Promise<void> }>} */
+    this.playbacks = new Map();
     this._running = false;
     this._syncToken = undefined;
+  }
+
+  /** Resolve (and cache) the #clips room ID; returns null if it cannot be resolved yet. */
+  async _getCommandRoomId() {
+    if (this.commandRoomId) return this.commandRoomId;
+    try {
+      this.commandRoomId = await this.matrix.resolveAlias(this.commandRoomAlias);
+    } catch (err) {
+      this.logger.warn?.(`[soundboard] Cannot resolve ${this.commandRoomAlias}: ${err.message}`);
+    }
+    return this.commandRoomId;
   }
 
   /**
    * Process a single `/sync` payload:
    *  - Auto-join invited rooms (`rooms.invite`)
-   *  - Handle timeline messages (`rooms.join`) when `processTimeline` is true
+   *  - Handle `!sb` messages, but only from the unencrypted #clips room, when `processTimeline`
    *
-   * On the very first sync (`processTimeline = false`), we advance `next_batch` and join
-   * pending invites without replaying historical `!sb play` commands from before startup.
+   * Commands never block the sync loop: `play` starts a background playback (see `handleCommand`).
    *
    * @param {object} syncData
    * @param {object} [opts]
@@ -68,7 +97,6 @@ export class SoundboardBot {
     if (!syncData || typeof syncData !== 'object') return;
     const rooms = syncData.rooms || {};
 
-    // 1. Accept any room invitations
     const invited = rooms.invite || {};
     for (const roomId of Object.keys(invited)) {
       try {
@@ -81,61 +109,68 @@ export class SoundboardBot {
 
     if (!processTimeline) return;
 
-    // 2. Process timeline events in joined rooms
     const joined = rooms.join || {};
-    for (const [roomId, roomData] of Object.entries(joined)) {
-      const events = roomData?.timeline?.events || [];
-      for (const ev of events) {
-        if (!ev || ev.type !== 'm.room.message') continue;
-        if (ev.sender === this.matrix.userId) continue;
-        const msgtype = ev.content?.msgtype;
-        if (msgtype !== 'm.text') continue;
-        const body = ev.content?.body;
-        const cmd = parseCommand(body);
-        if (!cmd) continue;
-
-        try {
-          await this.handleCommand(roomId, cmd);
-        } catch (err) {
-          this.logger.error?.(`[soundboard] Error handling command in ${roomId}: ${err.message}`);
-        }
+    const commandRoomId = Object.keys(joined).length ? await this._getCommandRoomId() : null;
+    const events = (commandRoomId && joined[commandRoomId]?.timeline?.events) || [];
+    for (const ev of events) {
+      if (!ev || ev.type !== 'm.room.message') continue;
+      if (ev.sender === this.matrix.userId) continue;
+      if (ev.content?.msgtype !== 'm.text') continue;
+      const cmd = parseCommand(ev.content?.body);
+      if (!cmd) continue;
+      try {
+        await this.handleCommand(commandRoomId, cmd);
+      } catch (err) {
+        this.logger.error?.(`[soundboard] Error handling command: ${err.message}`);
       }
     }
   }
 
   /**
-   * Execute a parsed `!sb` command in `roomId`.
+   * Execute a parsed `!sb` command issued in `replyRoomId` (#clips). Returns as soon as the
+   * command is acknowledged; playback runs in the background (await `whenIdle()` in tests).
    *
-   * @param {string} roomId
-   * @param {{ action: 'list' | 'play' | 'stop' | 'help', clip?: string, error?: string }} cmd
+   * @param {string} replyRoomId
+   * @param {{ action: 'list' | 'play' | 'stop' | 'help', clip?: string, room?: string, error?: string }} cmd
    */
-  async handleCommand(roomId, cmd) {
+  async handleCommand(replyRoomId, cmd) {
+    const say = (text) => this.matrix.sendNotice(replyRoomId, text);
+
     if (cmd.action === 'help') {
-      await this.matrix.sendNotice(
-        roomId,
-        `${cmd.error}. Commands: !sb list | !sb play <clip> | !sb stop`
-      );
+      await say(`${cmd.error}. Commands: !sb list | !sb play <clip> [in <room>] | !sb stop [in <room>]`);
       return;
     }
 
     if (cmd.action === 'list') {
       const names = this.clips.list();
-      const text =
+      await say(
         names.length > 0
           ? `Available clips (${names.length}): ${names.join(', ')}`
-          : 'No clips found in /clips.';
-      await this.matrix.sendNotice(roomId, text);
+          : 'No clips found in /clips.'
+      );
       return;
     }
 
     if (cmd.action === 'stop') {
-      const session = this.sessions.get(roomId);
-      if (session && session.connected) {
-        session.stopPlayback();
-        await this.matrix.sendNotice(roomId, 'Stopped playback.');
-      } else {
-        await this.matrix.sendNotice(roomId, 'Nothing is playing.');
+      let targets = [...this.playbacks.keys()];
+      if (cmd.room) {
+        const candidates = await this._listVoiceCandidates(replyRoomId);
+        const res = resolveVoiceRoom({
+          requested: cmd.room,
+          candidates: candidates.map((c) => ({ ...c, activeCall: true })),
+        });
+        if (!('roomId' in res)) {
+          await say(`No voice room matches "${cmd.room}".`);
+          return;
+        }
+        targets = targets.filter((id) => id === res.roomId);
       }
+      if (targets.length === 0) {
+        await say('Nothing is playing.');
+        return;
+      }
+      for (const id of targets) this._stopPlayback(id);
+      await say('Stopped playback.');
       return;
     }
 
@@ -144,73 +179,198 @@ export class SoundboardBot {
       if (!filePath) {
         const names = this.clips.list();
         const hint = names.length > 0 ? ` Available: ${names.join(', ')}` : '';
-        await this.matrix.sendNotice(roomId, `Unknown clip "${cmd.clip}".${hint}`);
+        await say(`Unknown clip "${cmd.clip}".${hint}`);
         return;
       }
 
-      // Check room state for an active MatrixRTC call before joining
-      const stateEvents = await this.matrix.getRoomState(roomId);
-      const activeMembers = findActiveCallMemberships(stateEvents, {
-        excludeUserId: this.matrix.userId,
-      });
-
-      if (activeMembers.length === 0) {
-        await this.matrix.sendNotice(
-          roomId,
-          'No active voice call in this room. Join the call first, then run !sb play.'
-        );
+      const candidates = await this._listVoiceCandidates(replyRoomId);
+      const res = resolveVoiceRoom({ requested: cmd.room, candidates });
+      if (!('roomId' in res)) {
+        await say(this._describeResolveFailure(res, cmd.room));
         return;
       }
+      this._startPlayback(res.roomId, filePath, replyRoomId);
+    }
+  }
 
-      const pcm = await this.decodeClip(filePath);
-      const session = await this._ensureRoomSession(roomId, activeMembers[0]);
-      await session.playPcm(pcm);
+  _describeResolveFailure(res, requested) {
+    const names = res.options.map((c) => c.names[0] || c.roomId).join(', ');
+    if (res.error === 'unknown') return `No voice room matches "${requested}".`;
+    if (res.error === 'no-active-call') {
+      return requested
+        ? `No active voice call in "${requested}". Join the call first, then run !sb play.`
+        : 'No active voice call in any room. Join a call first, then run !sb play <clip> [in <room>].';
+    }
+    return `Which room? Several match (${names}). Use !sb play <clip> in <room>.`;
+  }
+
+  /**
+   * Rooms in the same Space as #clips (via `m.space.parent` -> `m.space.child`), with their
+   * display names and whether a human has an active MatrixRTC membership. Rooms the bot cannot
+   * read (not joined) are skipped.
+   *
+   * @param {string} commandRoomId
+   * @returns {Promise<Array<{ roomId: string, names: string[], activeCall: boolean }>>}
+   */
+  async _listVoiceCandidates(commandRoomId) {
+    const own = await this.matrix.getRoomState(commandRoomId);
+    const parents = own
+      .filter((e) => e.type === 'm.space.parent' && Array.isArray(e.content?.via) && e.content.via.length)
+      .map((e) => e.state_key);
+    const childIds = new Set();
+    for (const parent of parents) {
+      try {
+        const st = await this.matrix.getRoomState(parent);
+        for (const e of st) {
+          if (e.type === 'm.space.child' && Array.isArray(e.content?.via) && e.content.via.length) {
+            childIds.add(e.state_key);
+          }
+        }
+      } catch (err) {
+        this.logger.warn?.(`[soundboard] Cannot read space ${parent}: ${err.message}`);
+      }
+    }
+    childIds.delete(commandRoomId);
+    for (const p of parents) childIds.delete(p);
+
+    const out = await Promise.all(
+      [...childIds].map(async (roomId) => {
+        try {
+          const st = await this.matrix.getRoomState(roomId);
+          const names = [];
+          for (const e of st) {
+            if (e.type === 'm.room.name' && e.content?.name) names.unshift(e.content.name);
+            if (e.type === 'm.room.canonical_alias') {
+              if (e.content?.alias) names.push(e.content.alias);
+              if (Array.isArray(e.content?.alt_aliases)) names.push(...e.content.alt_aliases);
+            }
+          }
+          const members = findActiveCallMemberships(st, { excludeUserId: this.matrix.userId });
+          return { roomId, names, activeCall: members.length > 0 };
+        } catch {
+          return null;
+        }
+      })
+    );
+    return out.filter(Boolean);
+  }
+
+  /**
+   * Start (or preempt with) a background playback in `voiceRoomId`. At most one runs per room:
+   * a new play aborts the previous one, and the new run begins only after it has unwound.
+   *
+   * @returns {Promise<void>} resolves when this playback ends (never rejects)
+   */
+  _startPlayback(voiceRoomId, filePath, replyRoomId) {
+    const prev = this.playbacks.get(voiceRoomId);
+    if (prev) prev.controller.abort();
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    const promise = (async () => {
+      await prev?.promise;
+      try {
+        if (signal.aborted) return;
+        const pcm = await this.decodeClip(filePath, { signal });
+        if (signal.aborted) return;
+        const session = await this._ensureRoomSession(voiceRoomId, signal, replyRoomId);
+        if (signal.aborted) return;
+        await session.playPcm(pcm, { signal });
+      } catch (err) {
+        if (isAbortError(err) || signal.aborted) return;
+        this.logger.error?.(`[soundboard] Playback failed in ${voiceRoomId}: ${err.message}`);
+        await this.matrix.sendNotice(replyRoomId, `Playback failed: ${err.message}`).catch(() => {});
+      } finally {
+        if (this.playbacks.get(voiceRoomId)?.controller === controller) {
+          this.playbacks.delete(voiceRoomId);
+        }
+      }
+    })();
+
+    this.playbacks.set(voiceRoomId, { controller, promise });
+    return promise;
+  }
+
+  _stopPlayback(voiceRoomId) {
+    this.playbacks.get(voiceRoomId)?.controller.abort();
+    this.sessions.get(voiceRoomId)?.stopPlayback();
+  }
+
+  /** Resolve once every in-flight playback has finished (used by tests and shutdown). */
+  async whenIdle() {
+    while (this.playbacks.size > 0) {
+      await Promise.all([...this.playbacks.values()].map((p) => p.promise));
     }
   }
 
   /**
    * Ensure the bot has joined the active MatrixRTC call in `roomId` and is connected to LiveKit.
    *
+   * The `room` sent to lk-jwt-service /sfu/get is always the Matrix room ID: v0.4.4 hashes it
+   * (sha256 of ["<room>","m.call#ROOM"], unpadded base64) into the LiveKit room name, and the
+   * `livekit_alias` in call.member events is the Matrix room ID too
+   * (element-hq/lk-jwt-service @ v0.4.4 main.go, LegacySFURequest + comment above `slotId`).
+   *
    * @param {string} roomId
-   * @param {{ callId?: string, livekitAlias?: string | null, livekitServiceUrl?: string | null }} [oldestMember]
+   * @param {AbortSignal} [signal]
+   * @param {string} [replyRoomId]  where to report an unexpected SFU disconnect
    * @returns {Promise<RoomCallSession>}
    */
-  async _ensureRoomSession(roomId, oldestMember) {
+  async _ensureRoomSession(roomId, signal, replyRoomId) {
     const existing = this.sessions.get(roomId);
-    if (existing && existing.connected) {
-      return existing;
-    }
+    if (existing && existing.connected) return existing;
 
-    const livekitServiceUrl =
-      oldestMember?.livekitServiceUrl || `https://${this.rtcFqdn}/livekit/jwt`;
-    const targetRoomAlias = oldestMember?.livekitAlias || roomId;
+    const stateEvents = await this.matrix.getRoomState(roomId);
+    const oldest = findActiveCallMemberships(stateEvents, { excludeUserId: this.matrix.userId })[0];
+    const livekitServiceUrl = oldest?.livekitServiceUrl || `https://${this.rtcFqdn}/livekit/jwt`;
 
-    // 1. Exchange Matrix OpenID token for LiveKit {url, jwt} via lk-jwt-service
     const openIdToken = await this.matrix.requestOpenIdToken();
     const { url, jwt } = await fetchLiveKitJwt({
       rtcFqdn: this.rtcFqdn,
-      roomId: targetRoomAlias,
+      roomId,
       openIdToken,
       deviceId: this.matrix.deviceId,
       fetchImpl: this.fetchImpl,
     });
+    if (signal?.aborted) throw abortError();
 
-    // 2. Post org.matrix.msc3401.call.member state event per MSC4143
-    const memberContent = buildCallMemberContent({
-      deviceId: this.matrix.deviceId,
-      roomId: targetRoomAlias,
-      livekitServiceUrl,
-      callId: oldestMember?.callId ?? '',
-    });
-    await this.matrix.putCallMemberState(roomId, memberContent);
+    const createdTs = Date.now();
+    const memberContent = (now) =>
+      buildCallMemberContent({
+        deviceId: this.matrix.deviceId,
+        roomId,
+        livekitServiceUrl,
+        callId: oldest?.callId ?? '',
+        createdTs, // preserved across refreshes so oldest_membership ordering is stable
+        expiresMs: now - createdTs + this.memberExpiresMs,
+      });
+    await this.matrix.putCallMemberState(roomId, memberContent(Date.now()));
 
-    // 3. Connect to LiveKit SFU and publish audio track
     const session = new RoomCallSession({
       roomId,
       idleTimeoutMs: this.idleTimeoutMs,
       rtcFactory: this.rtcFactory,
+      refreshMs: Math.floor(this.memberExpiresMs / 2),
+      // Extend `expires` (keeping created_ts) before it lapses, like matrix-js-sdk's
+      // MembershipManager UpdateExpiry action (src/matrixrtc/MembershipManager.ts).
+      onRefresh: async () => {
+        try {
+          await this.matrix.putCallMemberState(roomId, memberContent(Date.now()));
+        } catch (err) {
+          this.logger.warn?.(`[soundboard] call.member refresh failed in ${roomId}: ${err.message}`);
+        }
+      },
+      onDisconnected: (reason) => {
+        this.logger.warn?.(`[soundboard] SFU disconnected in ${roomId} (${reason ?? 'unknown'})`);
+        this.playbacks.get(roomId)?.controller.abort();
+        if (replyRoomId) {
+          this.matrix
+            .sendNotice(replyRoomId, 'Lost the voice connection; run !sb play again to rejoin.')
+            .catch(() => {});
+        }
+      },
       onLeave: async () => {
-        this.sessions.delete(roomId);
+        if (this.sessions.get(roomId) === session) this.sessions.delete(roomId);
         try {
           await this.matrix.putCallMemberState(roomId, buildLeaveCallMemberContent());
         } catch (err) {
@@ -224,7 +384,6 @@ export class SoundboardBot {
     try {
       await session.connect(url, jwt);
     } catch (err) {
-      // Roll back call.member state if SFU connection fails
       await this.matrix.putCallMemberState(roomId, buildLeaveCallMemberContent()).catch(() => {});
       throw err;
     }
@@ -239,7 +398,6 @@ export class SoundboardBot {
   async start() {
     this._running = true;
 
-    // Initial sync with timeout=0 to capture next_batch and join pending room invites
     const initial = await this.matrix.sync({ timeout: 0 });
     this._syncToken = initial.next_batch;
     await this.handleSyncResponse(initial, { processTimeline: false });
@@ -258,10 +416,13 @@ export class SoundboardBot {
   }
 
   /**
-   * Stop the bot, disconnect from all active LiveKit calls, and clear MatrixRTC call.member state.
+   * Stop the bot: abort all playbacks (killing ffmpeg), disconnect from every call and clear
+   * the MatrixRTC call.member state.
    */
   async shutdown() {
     this._running = false;
+    for (const pb of this.playbacks.values()) pb.controller.abort();
+    await this.whenIdle();
     const activeSessions = [...this.sessions.values()];
     this.sessions.clear();
     for (const session of activeSessions) {
