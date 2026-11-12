@@ -13,10 +13,11 @@ Element X (mobile) and Element Desktop/Web use **Element Call** (built on Matrix
    - Element Call does not expose a UI selector for **1080p60** or **1440p60**, nor does it allow overriding `maxBitrate` or `maxFramerate` per session.
 2. **Degradation Preference**:
    - WebRTC and LiveKit default screen shares to `degradationPreference: "maintain-resolution"` (`contentHint: "detail"`). When encoding fast-moving 3D games, transient bitrate spikes cause WebRTC to drop frame rate down to 10–20 FPS to preserve static text sharpness. Game streaming requires `maintain-framerate` (or balanced mode) with a higher bitrate ceiling.
-3. **Audio Processing on Screen-Share Audio**:
-   - Standard voice call pipelines apply WebRTC speech processing (`echoCancellation`, `noiseSuppression`, `autoGainControl`) and mono downmixing, which warps music and game sound effects unless explicitly disabled (`echoCancellation: false`, `noiseSuppression: false`, `autoGainControl: false`, stereo 48 kHz Opus).
+3. **Audio Processing & System-Audio Gaps**:
+   - In Element Call (`element-hq/element-call`), screen share audio capture is either omitted by default (`setScreenShareEnabled(true)` without stereo music options) or routed through standard WebRTC voice constraints (`echoCancellation`, `noiseSuppression`, `autoGainControl`, mono 32–48 kbps Opus), which warps game soundtracks and spatial audio unless explicitly overridden (`echoCancellation: false`, `noiseSuppression: false`, `autoGainControl: false`, stereo 48 kHz Opus at 128–160 kbps).
+   - On Element Desktop (Electron `desktopCapturer`), cross-platform system audio loopback has longstanding OS-level limitations compared to native Chromium `getDisplayMedia({ systemAudio: "include" })`.
 4. **Element X Mobile Constraints**:
-   - Mobile clients (Element X iOS/Android) can *view* high-FPS LiveKit screen shares published to a MatrixRTC call room, but OS-level replay kit / media projection constraints and mobile battery/thermal limits make mobile unsuitable as a 1440p60 publisher.
+   - Element X (iOS/Android) embeds Element Call inside a mobile WebView (`ElementCallWidget`). While mobile clients can *view* high-FPS LiveKit screen shares published to a MatrixRTC call room via hardware-accelerated WebRTC decode, mobile WebViews do not support desktop `getDisplayMedia` with 60 FPS + stereo system audio publishing.
 
 Because Element Call and the Go-Live page share the same LiveKit SFU and MatrixRTC signaling (`org.matrix.msc3401.call.member` + `lk-jwt-service`), a streamer can publish from `https://<CHAT_FQDN>/golive/` while friends watch either directly inside **Element Call** or via the Go-Live **Viewer Mode**.
 
