@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { caReexecEnv, cmdCaExport, parseArgs } from "../squadz.mjs";
+import { caReexecEnv, cmdCaExport, meshCaPath, parseArgs } from "../squadz.mjs";
 import {
   buildMeshEnvValues, caTrustInstructions, generateSecrets, hostsLine, isInternalTls, parseNordLocalIp,
   renderEnv, runDoctor, validateEnvForMode, validateMeshInputs, checkMeshHost, checkMeshTls, formatDoctor,
@@ -184,4 +184,11 @@ test("caReexecEnv: trusts the exported CA only in internal TLS mode, once, when 
   assert.equal(caReexecEnv({ SQUADZ_TLS: "internal", NODE_EXTRA_CA_CERTS: "/y" }, "/x/ca", yes), null, "user already set it");
   assert.equal(caReexecEnv({ SQUADZ_TLS: "internal", SQUADZ_CA_REEXEC: "1" }, "/x/ca", yes), null, "no re-exec loop");
   assert.equal(caReexecEnv({ SQUADZ_TLS: "acme" }, "/x/ca", yes), null, "public TLS mode");
+});
+
+test("meshCaPath: CA resolves from the --env-file directory, NODE_EXTRA_CA_CERTS wins (idea-341)", () => {
+  const dir = path.join(os.tmpdir(), "squadz-envdir");
+  assert.equal(meshCaPath({}, path.join(dir, ".env")), path.join(dir, "squadz-ca.crt"));
+  assert.notEqual(path.dirname(meshCaPath({}, path.join(dir, ".env"))), ROOT);
+  assert.equal(meshCaPath({ NODE_EXTRA_CA_CERTS: "/x/ca.pem" }, path.join(dir, ".env")), "/x/ca.pem");
 });
