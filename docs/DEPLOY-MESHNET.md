@@ -28,6 +28,19 @@ Option A also behaves identically on Tailscale and keeps the stack's contract (t
 The names are overridable: `--chat-host` / `--rtc-host`. Mobile browsers cannot edit hosts files,
 which is another reason phones are best-effort here.
 
+## Quick start: `squadz init`
+
+```bash
+node scripts/squadz.mjs init --mesh-only --dry-run   # print the plan, run nothing
+node scripts/squadz.mjs init --mesh-only             # setup > Caddy > CA export > stack > bootstrap > restart > doctor > first invite
+```
+
+It chains sections 2 to 5 below, passes `squadz-ca.crt` to bootstrap itself (no manual `NODE_EXTRA_CA_CERTS`),
+and ends with the friend-onboarding summary (invite, hosts + CA steps per OS, the Cinny URL). It is
+resumable: an existing `.env`, exported CA, running stack or bootstrapped server is detected and skipped.
+It stops at the first failure and prints the exact command to run, then re-run `init` to continue.
+Do the hosts-file entry (section 3) on this host before the doctor step. The manual steps below remain for reference.
+
 ## 1. Host prep (about 5 min)
 
 ```bash

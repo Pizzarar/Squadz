@@ -6,6 +6,10 @@ Written for Aub: an Ubuntu box, a Tailscale account, a domain on Cloudflare. Abo
 Everything operational goes through one tool: `node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|backup|restore|service|update>`
 (`node scripts/squadz.mjs --help`). Background and troubleshooting live in [SETUP.md](SETUP.md).
 
+> **Fastest path:** `node scripts/squadz.mjs init` chains sections 3 to 7 (setup, up, bootstrap, restart, doctor, first invite),
+> skips whatever is already done, and stops with the exact next command on failure. `--dry-run` prints the plan; for the
+> no-domain Meshnet first test use `init --mesh-only` ([DEPLOY-MESHNET.md](DEPLOY-MESHNET.md)). Do sections 1 and 2 (host prep, DNS) first.
+
 ## 0. What you need
 
 | Thing | Notes |
