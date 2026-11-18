@@ -37,6 +37,9 @@ RUN cd /srv/cinny \
  && grep -q '<title>Squadz</title>' index.html \
  && grep -q 'href="/squadz.css"' index.html \
  && grep -q 'src="/squadz-init.js"' index.html \
+ && grep -q 'data-call-embed-container' /srv/cinny/squadz-init.js \
+ && grep -q 'squadz-golive' /srv/cinny/squadz.css \
+ && grep -q 'data-call-embed-container' /srv/cinny/assets/index-*.js \
  && grep -q 'href="/squadz/icon-32.png"' index.html \
  && grep -q 'content="#0E0F22"' index.html \
  && grep -q 'content="Squadz"' index.html \

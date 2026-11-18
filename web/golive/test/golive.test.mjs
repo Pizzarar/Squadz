@@ -152,3 +152,22 @@ describe('publish / stats / cleanup (mocks)', () => {
     assert.equal(inits[1].body, '{}');
   });
 });
+
+describe('room prefill (?room=)', () => {
+  it('parses room ids and aliases, rejects junk', () => {
+    assert.equal(mx.roomFromSearch('?room=%21abc%3Ahs.example'), '!abc:hs.example');
+    assert.equal(mx.roomFromSearch('?room=%23lounge%3Ahs.example'), '#lounge:hs.example');
+    assert.equal(mx.roomFromSearch('?room=evil'), '');
+    assert.equal(mx.roomFromSearch(''), '');
+  });
+  it('selects a known option, otherwise fills the custom field', () => {
+    const sel = { options: [{ value: '#lounge:s' }, { value: '#game-night:s' }], value: '#lounge:s' };
+    const custom = { value: 'x' };
+    mx.prefillRoom('#game-night:s', sel, custom);
+    assert.equal(sel.value, '#game-night:s');
+    assert.equal(custom.value, '');
+    mx.prefillRoom('!id:s', sel, custom);
+    assert.equal(custom.value, '!id:s');
+    assert.equal(sel.value, '#game-night:s');
+  });
+});

@@ -106,3 +106,19 @@ export function sendCallMember({ homeserver, roomId, userId, deviceId, token, li
 export function clearCallMember({ homeserver, roomId, userId, deviceId, token, fetchImpl = globalThis.fetch, keepalive = false }) {
   return putState(homeserver, roomId, userId, deviceId, token, {}, fetchImpl, keepalive);
 }
+
+/** Room id/alias from a `?room=` query string (e.g. location.search), or '' if absent/invalid. */
+export function roomFromSearch(search) {
+  const v = (new URLSearchParams(search || '').get('room') || '').trim();
+  return /^[!#][^\s]+:[^\s]+$/.test(v) ? v : '';
+}
+
+/**
+ * Prefill the lobby room pickers: select a matching option, else put it in the custom field.
+ * `sel` is a <select>-like ({options, value}); `custom` an <input>-like ({value}).
+ */
+export function prefillRoom(room, sel, custom) {
+  if (!room) return;
+  const hit = Array.from(sel.options).find((o) => o.value === room);
+  if (hit) { sel.value = room; custom.value = ''; } else { custom.value = room; }
+}

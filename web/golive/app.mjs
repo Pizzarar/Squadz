@@ -1,5 +1,5 @@
 // DOM wiring + state machine: login -> lobby -> streaming | watching.
-import { login, resolveRoom, openidToken, resolveLivekitServiceUrl, sendCallMember, clearCallMember, serverNameFromUserId, defaultRoomAliases } from './lib/matrix.mjs';
+import { login, resolveRoom, openidToken, resolveLivekitServiceUrl, sendCallMember, clearCallMember, serverNameFromUserId, defaultRoomAliases, roomFromSearch, prefillRoom } from './lib/matrix.mjs';
 import { fetchSfuToken } from './lib/lkjwt.mjs';
 import { startCapture } from './lib/capture.mjs';
 import { publish, stop, watch, videoStats } from './lib/publish.mjs';
@@ -27,6 +27,7 @@ $('btn-login').onclick = guard(async () => {
   $('who').textContent = s.session.userId;
   const sel = $('room-select');
   sel.replaceChildren(...defaultRoomAliases(serverNameFromUserId(s.session.userId)).map((a) => new Option(a, a)));
+  prefillRoom(roomFromSearch(window.location.search), sel, $('room-custom')); // /golive?room=<id|alias>
   show('lobby');
 });
 
