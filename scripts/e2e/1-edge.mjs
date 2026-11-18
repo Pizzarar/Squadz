@@ -95,4 +95,51 @@ run(async () => {
     const g = await fetch(`${cfg.chatUrl}/golive/`);
     assertEq(g.status, 200, "/golive/ still served");
   });
+  await step("C7: hosted web client + Caddy route assertions", async () => {
+    const root = await fetch(`${cfg.chatUrl}/`);
+    assertEq(root.status, 200, "/ status");
+    assert((root.headers.get("content-type") ?? "").includes("text/html"), "/ is text/html");
+    const html = await root.text();
+    assert(/id=["']root["']/.test(html), "/ contains Cinny's #root mount point");
+
+    // SPA fallback for history-routed deep links returns the same index.
+    for (const p of ["/home/", "/home/some-room"]) {
+      const d = await fetch(`${cfg.chatUrl}${p}`);
+      assertEq(d.status, 200, `${p} SPA fallback status`);
+      assertEq(await d.text(), html, `${p} serves the SPA index`);
+    }
+
+    // Locked config.
+    const c = await (await fetch(`${cfg.chatUrl}/config.json`)).json();
+    assertEq(c.homeserverList, [cfg.chatFqdn], "homeserverList");
+    assertEq(c.allowCustomHomeservers, false, "server locked");
+
+    // Frame headers: same-origin framing allowed (Element Call widget), cross-origin denied.
+    for (const p of ["/", "/public/element-call/index.html"]) {
+      const r = await fetch(`${cfg.chatUrl}${p}`);
+      assertEq(r.headers.get("x-frame-options"), "SAMEORIGIN", `${p} X-Frame-Options`);
+      assertEq(r.headers.get("content-security-policy"), "frame-ancestors 'self'", `${p} CSP`);
+      await r.arrayBuffer();
+    }
+
+    // /golive redirect target + trailing slash.
+    const rd = await fetch(`${cfg.chatUrl}/golive`, { redirect: "manual" });
+    assertEq(rd.status, 308, "/golive status");
+    assert((rd.headers.get("location") ?? "").endsWith("/golive/"), "/golive Location ends with /golive/");
+    assertEq((await fetch(`${cfg.chatUrl}/golive/`)).status, 200, "/golive/ status");
+
+    // API routes are not swallowed by the SPA fallback.
+    const v = await fetch(`${cfg.chatUrl}/_matrix/client/versions`);
+    assert((v.headers.get("content-type") ?? "").includes("json"), "versions is JSON, not index.html");
+    const wk = await fetch(`${cfg.chatUrl}/.well-known/matrix/client`);
+    assert((wk.headers.get("content-type") ?? "").includes("json"), "well-known is JSON, not index.html");
+
+    // A hashed asset referenced from index.html is served as JS.
+    const m = html.match(/(?:src|href)=["']([^"']+\.js)["']/);
+    assert(m, "index.html references a .js asset");
+    const a = await fetch(new URL(m[1], `${cfg.chatUrl}/`));
+    assertEq(a.status, 200, `${m[1]} status`);
+    assert(/javascript/.test(a.headers.get("content-type") ?? ""), `${m[1]} JS content-type`);
+    await a.arrayBuffer();
+  });
 });
