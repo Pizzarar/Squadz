@@ -48,7 +48,7 @@ jobs:
           RTC_FQDN=rtc.squadz.test
           MESH_IP=${MESH_IP}
           ACME_EMAIL=ci@squadz.test
-          CLOUDFLARE_API_TOKEN=unused-in-ci
+          CLOUDFLARE_API_TOKEN=ciDummyCloudflareTokenNotRealXXXXXXXXXX1234
           LIVEKIT_API_KEY=devkey
           LIVEKIT_API_SECRET=ci_livekit_secret_that_is_at_least_32_chars_long
           TUWUNEL_REGISTRATION_TOKEN=ci-test-registration-token
