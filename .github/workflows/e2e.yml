@@ -103,6 +103,9 @@ jobs:
       - name: "E2E 2b - squadz emoji add/list/remove against the live pack"
         run: node scripts/e2e/2b-emoji.mjs
 
+      - name: "E2E 2c - squadz server set/show (name, topic, pinned welcome)"
+        run: node scripts/e2e/2c-server.mjs
+
       - name: "E2E 3 - OpenID -> lk-jwt-service /sfu/get -> LiveKit join"
         run: node scripts/e2e/3-rtc.mjs
 

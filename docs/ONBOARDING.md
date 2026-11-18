@@ -66,6 +66,8 @@ Once signed in:
    - **Memes** — memes
    - **Lounge** and **Game Night** — voice rooms (see below)
 
+Look for the **pinned welcome message** in **General**: it has the house rules, what each room is for, how to join voice, and how to ask for a custom emoji. (The host can change it with `squadz server set --welcome`.)
+
 > The rooms are **restricted** to Space members: once you've joined the Squadz
 > space you can enter any of its rooms directly — you don't need a separate
 > invite per room. (You only need the one invite to the Space.)

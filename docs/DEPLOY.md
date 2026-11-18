@@ -155,6 +155,18 @@ node scripts/squadz.mjs emoji remove party_parrot
 
 Shortcodes are `[a-z0-9_]{2,32}`; files must be png, gif, webp or jpg. The image is uploaded once and added to the MSC2545 pack (`im.ponies.room_emotes`) on the Space and every text room, keeping the existing images; re-adding a shortcode replaces it. The picker updates live in Cinny; Element X may need a room reopen.
 
+### Server settings & welcome
+
+```bash
+node scripts/squadz.mjs server show
+node scripts/squadz.mjs server set --name "Our Squad" --icon ./logo.png --topic general="Chat here" --topic clips="Soundboard: !sb list"
+node scripts/squadz.mjs server set --welcome config/welcome.md
+```
+
+`--name` sets the Space name; `--icon` (png/jpg/webp, <= 2MB) sets the Space avatar (`--icon-all` also applies it to every room); `--topic ROOM=TEXT` is repeatable and takes a room slug (`general`, `games`, `clips`, `memes`, `lounge`, `game-night`, `squadz`). `--welcome FILE.md` posts the markdown as an `m.notice` in #general (plain `body` plus a minimal-HTML `formatted_body`) and pins it, **replacing** the previous welcome pin; other pins are kept. Everything is idempotent: unchanged values are not rewritten and identical welcome text is not re-posted. `show` prints the name, icon mxc, every topic and the pinned welcome event id.
+
+`bootstrap.mjs` seeds `config/welcome.md` (house rules, channel guide, joining voice, `!sb`, asking for emoji) only if no welcome exists yet, so edit that file and run `server set --welcome config/welcome.md` to republish. Note #general is encrypted: the welcome is sent unencrypted (the CLI has no E2EE), so clients show it with an "unencrypted" shield. It is public house info only; don't put secrets in it.
+
 ## Sources
 
 - Tuwunel v1.5.1: `auto_join_rooms` and `registration_token_file` in `tuwunel-example.toml`; auto-join in `src/service/users/register.rs`; `token issue [--once|--max-uses|--max-age]` in `src/admin/token/`; `users list-users` in `src/admin/user/commands.rs`; `server backup-database` in `src/admin/server/`; first user becomes admin in `src/service/users/register.rs`. <https://github.com/matrix-construct/tuwunel>

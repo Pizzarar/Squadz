@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Squadz bootstrap/seed scripts. Node 20+ ESM, built-in fetch + node:test only, no runtime dependencies.",
   "scripts": {
-    "test": "node --test test/bootstrap.test.mjs test/ops.test.mjs test/emoji.test.mjs"
+    "test": "node --test test/bootstrap.test.mjs test/ops.test.mjs test/emoji.test.mjs test/server.test.mjs"
   },
   "engines": {
     "node": ">=20"

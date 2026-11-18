@@ -10,12 +10,14 @@
 // Config comes from the environment (or --env-file); CHAT_FQDN,
 // SQUADZ_ADMIN_PASSWORD and TUWUNEL_REGISTRATION_TOKEN are required.
 
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadEnvFile, resolveConfig, toUserId } from "./lib/config.mjs";
 import { createMatrixClient } from "./lib/matrix.mjs";
 import { seed } from "./lib/seed.mjs";
+import { postWelcome } from "./lib/server.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -79,6 +81,15 @@ async function main() {
   process.stdout.write(`Server name: ${config.serverName}\n`);
 
   const summary = await seed(client, config, (msg) => process.stdout.write(`  ${msg}\n`));
+
+  // Seed the default welcome (config/welcome.md) only when none exists yet, so
+  // re-running bootstrap never overwrites what the host posted with `squadz server set`.
+  const welcomeFile = path.resolve(here, "..", "config", "welcome.md");
+  if (existsSync(welcomeFile)) {
+    const w = await postWelcome(client, config, readFileSync(welcomeFile, "utf8"), { onlyIfMissing: true });
+    summary.welcome = w;
+    process.stdout.write(`  welcome: ${w.posted ? "posted + pinned" : "already present"} (${w.eventId})\n`);
+  }
 
   process.stdout.write("\nDone.\n");
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);

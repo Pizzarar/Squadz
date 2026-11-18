@@ -257,6 +257,15 @@ export function createMatrixClient(baseUrl) {
       );
     },
 
+    /** Send an arbitrary m.room.message content object. @returns {{ event_id: string }} */
+    sendMessage(roomId, content, txnId = `squadz-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`) {
+      return client.request(
+        "PUT",
+        `/_matrix/client/v3/rooms/${enc(roomId)}/send/m.room.message/${enc(txnId)}`,
+        { body: content },
+      );
+    },
+
     /** Newest-first room timeline. @returns {{ chunk: object[] }} */
     messages(roomId, limit = 20) {
       return client.request(
