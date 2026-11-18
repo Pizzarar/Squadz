@@ -27,3 +27,7 @@ Each block goes to Review - Gemini (Claude wrote it). The reviewer's own first l
 
 ## In flight
 - 2026-11-17: P2 opened. C1, C2, C3a dispatched (worktrees `~/.paseo/worktrees/squadz/c1..c3`, branches `unit/c1..c3` off c68c1d6).
+- C3a: PASS 0/0/0 ee2841f (narrow re-review rn-a47a56854951; first reviewer hit 253k with no verdict and was cancelled). Pick: Cinny v4.12.8. MERGED.
+- C1: PASS 0/0/2 89b6508 (rn-b81d13540bbc). MERGED. C2: PASS 0/0/3 34eae6f (rn-318e0f90c36b). MERGED (.gitignore union conflict resolved) at 2b21dcf. dev: validate 10/10, scripts 27/27, e2e helpers 6/6.
+- In flight: C3b host Cinny (Implement - Sonnet rn-97ad090d79a3, unit/c3b); C4 = the 5 lows from the C1/C2 reviews (Work Order - DSP rn-750c7a1b275e, unit/c4). No clash: C4 doesn't touch compose/Caddyfile.
+- Real-stack e2e has never run: it needs `dev` pushed (owner OK pending).
