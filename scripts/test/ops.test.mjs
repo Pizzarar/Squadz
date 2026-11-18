@@ -6,17 +6,20 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createMockHomeserver } from "./mock-homeserver.mjs";
 import { createMatrixClient } from "../lib/matrix.mjs";
 import { seed } from "../lib/seed.mjs";
+import { cmdBackup } from "../squadz.mjs";
 import {
   aliasesFor, backupFileName, buildEnvValues, buildInviteMessage, checkContainers, checkDns,
-  checkJwtHealth, checkTls, checkVersions, checkWellKnown, formatDoctor, generateSecrets, isFqdn,
-  issueToken, listUsers, obtainToken, parseComposePs, parseMeshIp, renderEnv, runDoctor, setRole,
-  suggestUsername, syncMembers, validateSetupInputs, withUserLevel,
+  checkJwtHealth, checkTls, checkVersions, checkWellKnown, formatDoctor, generateSecrets,
+  hasUserAtLevel, isFqdn, issueToken, listUsers, obtainToken, parseComposePs, parseMeshIp,
+  renderEnv, runDoctor, setRole, suggestUsername, syncMembers, validateSetupInputs, withUserLevel,
 } from "../lib/ops.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -204,6 +207,16 @@ test("role: rejects bad role, unknown user, and demoting the admin", async () =>
   assert.deepEqual(withUserLevel({ users: { a: 1 }, ban: 50 }, "b", 50), { users: { a: 1, b: 50 }, ban: 50 });
 });
 
+test("role: refuses to demote the last user at power level >= 100, even with --force", async () => {
+  assert.equal(hasUserAtLevel({ users: { a: 100 }, users_default: 0 }, 100), true);
+  assert.equal(hasUserAtLevel({ users: { a: 50 }, users_default: 0 }, 100), false);
+  assert.equal(hasUserAtLevel({ users: {}, users_default: 100 }, 100), true);
+  await assert.rejects(
+    setRole(client, config, "admin", "member", { force: true }),
+    /no user would remain at power level >= 100/,
+  );
+});
+
 // --- sync-members ----------------------------------------------------------
 
 test("sync-members invites every local user to the Space once", async () => {
@@ -221,4 +234,32 @@ test("sync-members invites every local user to the Space once", async () => {
 
 test("backupFileName is dated and sortable", () => {
   assert.equal(backupFileName(new Date("2026-11-17T09:05:03.123Z")), "squadz-backup-20261117-090503.tar.gz");
+});
+
+test("backup: a tar failure still removes the staging dir (and its copied .env)", () => {
+  const tmp = os.tmpdir();
+  const marker = "squadz-backup-";
+  const before = new Set(readdirSync(tmp).filter((d) => d.startsWith(marker)));
+  const fakeEnv = path.join(tmp, `squadz-test-env-${process.pid}-${Date.now()}.env`);
+  writeFileSync(fakeEnv, "SQUADZ_DOMAIN=example.com\n");
+  const stubRun = (cmd, args) => {
+    if (cmd === "tar" && args[0] === "czf") return { status: 1, stdout: "", stderr: "tar: fail", error: null };
+    if (cmd === "docker") {
+      if (args[0] === "compose" && args[1] === "config") return { status: 0, stdout: '{"name":"squadz"}' };
+      if (args[0] === "volume") return { status: 0, stdout: "squadz_tuwunel_data\n" };
+      if (args[0] === "compose" && args[1] === "ps") return { status: 0, stdout: "" };
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    throw new Error(`unexpected run: ${cmd} ${args.join(" ")}`);
+  };
+  try {
+    assert.throws(
+      () => cmdBackup({ out: tmp }, { run: stubRun, envFile: fakeEnv }),
+      /creating the archive/,
+    );
+    const leftover = readdirSync(tmp).filter((d) => d.startsWith(marker) && !before.has(d));
+    assert.deepEqual(leftover, [], "staging dir removed after tar failure");
+  } finally {
+    rmSync(fakeEnv, { force: true });
+  }
 });
