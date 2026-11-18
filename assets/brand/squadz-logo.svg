@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 128" width="440" height="128" role="img" aria-label="Squadz">
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1B1D3F"/>
+      <stop offset="1" stop-color="#0B0C19"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.58" r="0.5">
+      <stop offset="0" stop-color="#2EE6A6" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#2EE6A6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <rect width="128" height="128" rx="30" fill="url(#glow)"/>
+  <!-- three friends: a squad of three, overlapping -->
+  <circle cx="45" cy="50" r="22" fill="#7C5CFF"/>
+  <circle cx="83" cy="50" r="22" fill="#F2F3FF" fill-opacity="0.96"/>
+  <circle cx="64" cy="84" r="22" fill="#2EE6A6"/>
+
+
+  <g transform="translate(142 34) scale(1)" fill="none" stroke="#F2F3FF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"><path transform="translate(0 0)" d="M33 17C33 5 7 5 7 18C7 31 33 29 33 42C33 56 7 56 7 44"/><path transform="translate(48 0)" d="M20 6H20C30 6 34 14 34 30S30 54 20 54S6 46 6 30S10 6 20 6ZM24 42L36 58"/><path transform="translate(96 0)" d="M7 6V36A13 18 0 0 0 33 36V6"/><path transform="translate(144 0)" d="M5 56L20 6L35 56M10 38H30"/><path transform="translate(192 0)" d="M7 6V54H17C41 54 41 6 17 6Z"/><path transform="translate(240 0)" d="M7 6H33L7 54H33"/></g>
+</svg>

@@ -69,6 +69,21 @@ run(async () => {
     assert(/id=["']root["']/.test(html), "/ contains Cinny's #root mount point");
     assert(!root.headers.has("permissions-policy"), "no Permissions-Policy header (breaks screen share)");
 
+    // Squadz brand assets are served (same-origin, so the frame-ancestors CSP is untouched).
+    const css = await fetch(`${cfg.chatUrl}/squadz.css`);
+    assertEq(css.status, 200, "/squadz.css status");
+    assert((css.headers.get("content-type") ?? "").includes("text/css"), "/squadz.css is text/css");
+    assert(/#2EE6A6/i.test(await css.text()), "/squadz.css carries the Squadz accent");
+    for (const p of ["/squadz-init.js", "/squadz/icon-32.png", "/squadz/icon-192.png", "/squadz/icon-512.png", "/squadz/icon.svg"]) {
+      const r = await fetch(`${cfg.chatUrl}${p}`);
+      assertEq(r.status, 200, `${p} status`);
+      assert(!(r.headers.get("content-type") ?? "").includes("text/html"), `${p} is not the SPA fallback`);
+      await r.arrayBuffer();
+    }
+    const man = await (await fetch(`${cfg.chatUrl}/manifest.json`)).json();
+    assertEq(man.name, "Squadz", "manifest name");
+    assert(man.icons?.length >= 2, "manifest has icons");
+
     // Locked config: only ours, never cached.
     const conf = await fetch(`${cfg.chatUrl}/config.json`);
     assertEq(conf.status, 200, "/config.json status");
