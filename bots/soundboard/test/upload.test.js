@@ -294,8 +294,12 @@ describe('bot !sb add / remove', () => {
   it('shutdown() aborts an in-flight add decode', async () => {
     const { bot, notices, add } = setup();
     bot.decodeClip = (_p, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(Object.assign(new Error('Aborted'), { name: 'AbortError' }))));
+    const started = new Promise((resolve) => {
+      const inner = bot.decodeClip;
+      bot.decodeClip = (...a) => { resolve(); return inner(...a); };
+    });
     const p = add('stuck');
-    await new Promise((r) => setTimeout(r, 20));
+    await started; // decode is in flight: no timers involved
     await bot.shutdown();
     await p;
     assert.match(notices[0], /timed out or was cancelled/);
