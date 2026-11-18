@@ -64,7 +64,7 @@ Global: --env-file <path> (default ./.env)  -h, --help
 
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const flags = {};
   const pos = [];
   const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "env-file", "icon", "welcome"]);

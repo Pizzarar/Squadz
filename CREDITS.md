@@ -19,5 +19,4 @@ Squadz is glue around these open-source projects. Nothing here is copied code un
 - Implemented Go-Live screen-share publish (vendored livekit-client 2.23.0, unmodified, Apache-2.0) — Thanks to livekit-client (client-sdk-js) by LiveKit
 - Implemented `getDisplayMedia` hint notes — Thanks to MDN Web Docs by Mozilla contributors
 - Implemented real-stack e2e CI (internal-TLS overlay, LiveKit twirp/signalling checks, LIVEKIT_INSECURE_SKIP_VERIFY_TLS test switch) — Thanks to Caddy by the Caddy authors (Matthew Holt et al.), lk-jwt-service by element-hq and livekit/protocol by LiveKit
-
-Implemented `squadz server` settings + pinned welcome — inspired by Discord's server settings / welcome screen (no code borrowed).
+- Implemented `squadz server` settings + pinned welcome (name/icon/topics, markdown notice) — Thanks to Discord (server settings and welcome screen, design inspiration only, no code borrowed) by Discord Inc.

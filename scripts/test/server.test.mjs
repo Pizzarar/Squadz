@@ -147,3 +147,14 @@ test("postWelcome onlyIfMissing (bootstrap path): seeds once, never overwrites; 
     await mock2.stop();
   }
 });
+
+test("CLI parseArgs: repeated --topic collects into an array; other flags still work", async () => {
+  const { parseArgs } = await import("../squadz.mjs");
+  const { flags, pos } = parseArgs(["server", "set", "--name", "X", "--topic", "general=A b", "--topic=clips=C=D", "--icon-all"]);
+  assert.deepEqual(pos, ["server", "set"]);
+  assert.deepEqual(flags.topic, ["general=A b", "clips=C=D"]);
+  assert.equal(flags.name, "X");
+  assert.equal(flags["icon-all"], true);
+  assert.deepEqual(flags.topic.map(parseTopicArg), [{ slug: "general", text: "A b" }, { slug: "clips", text: "C=D" }]);
+  assert.throws(() => parseArgs(["--topic"]), /requires a value/);
+});
