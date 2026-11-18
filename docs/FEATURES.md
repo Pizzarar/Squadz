@@ -13,8 +13,8 @@ exercises them against the real Tuwunel in the compose stack:
 If an endpoint is missing, the step fails with `MISSING ENDPOINT: ...` naming the endpoint. The
 legacy `/v3/.../relations` alias is probed but only reported, not required.
 
-Status: the step is new in G2; see the PR's E2E run for the confirmed result against the pinned
-Tuwunel image. Note `.github/workflows/e2e.yml` lists steps explicitly, so phase 2e must be added
-there as its own step (`run: node scripts/e2e/2e-search.mjs`) after 2d.
+Status (E2E run 44410394273, all four checks PASS on the pinned Tuwunel): `/v3/search`, `m.thread`
+replies, `/v1/.../relations/{root}/m.thread` and `/v1/.../threads` (with bundled thread summary) all
+work. The legacy `/v3/.../relations` alias returns HTTP 404; Cinny does not need it.
 
 Implemented search/thread sanity checks against Cinny's needs — Thanks to Cinny by Ajay Bura.
