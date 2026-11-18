@@ -15,6 +15,21 @@ writing this revision), `[assumption]`, `[starting value, tune]` (our own pick, 
 Element X and Element Desktop/Web use Element Call (MatrixRTC, `livekit-client`) for calls. Contract:
 `docs/plans/P1-foundation.md` on `dev` (well-known advertises `org.matrix.msc4143.rtc_foci`).
 
+### 1a. Cinny 4.12.8 voice rooms: Element Call screenshare (checked 2026-11-18, Block G1)
+
+Read from the pinned release tarball (`cinny-v4.12.8.tar.gz`, sha256 in `caddy/Dockerfile`):
+- Cinny embeds its bundled Element Call (`public/element-call/index.html`) as a widget with
+  `header=none`, `skipLobby=true`, `confineToRoom=true`. It never passes `hideScreensharing`.
+- Element Call's bundle contains the share toggle (`toggleScreenSharing` -> `setScreenShareEnabled(on,
+  {audio: AGC/NS/voiceIsolation off, systemAudio: "include", surfaceSwitching: "include"})`) and shows it when
+  `navigator.mediaDevices.getDisplayMedia` exists and `hideScreensharing` is unset. So **desktop browsers
+  should offer screenshare in Cinny voice rooms**; mobile webviews lack `getDisplayMedia` and will not.
+- Capture options are Element Call's own (no fps/bitrate/codec control), so it is the convenient path and the
+  `/golive` page remains the high-FPS path. Status: **bundle-verified, not yet exercised in a live call**.
+- Go-Live entry: `caddy/brand/squadz-init.js` shows a "Go Live" link (bottom right) while Cinny's call view is
+  visible (`[data-call-embed-container]` inline `visibility` not `hidden`; Cinny keeps that div mounted always).
+  The room is the last `!id`/`#alias` path segment. It opens `/golive?room=<id|alias>`, which prefills the lobby.
+
 1. **`livekit-client` defaults** `[src: client-sdk-js src/room/track/options.ts]`. `ScreenSharePresets` are:
 
    | Preset | Resolution | maxBitrate | maxFramerate |

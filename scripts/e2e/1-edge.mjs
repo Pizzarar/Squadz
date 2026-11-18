@@ -80,6 +80,8 @@ run(async () => {
       assert(!(r.headers.get("content-type") ?? "").includes("text/html"), `${p} is not the SPA fallback`);
       await r.arrayBuffer();
     }
+    const initJs = await (await fetch(`${cfg.chatUrl}/squadz-init.js`)).text();
+    assert(initJs.includes("squadz-golive") && initJs.includes("/golive?room="), "squadz-init.js carries the Go-Live hook");
     const man = await (await fetch(`${cfg.chatUrl}/manifest.json`)).json();
     assertEq(man.name, "Squadz", "manifest name");
     assert(man.icons?.length >= 2, "manifest has icons");
