@@ -292,9 +292,9 @@ export function suggestUsername(hint) {
  * @param {string} p.chatFqdn @param {string} p.token
  * @param {boolean} p.singleUse @param {string} [p.name]
  * @param {string} [p.meshInvite] Tailscale invite/share link, if the host has one
- * @param {boolean} [p.web] mention the hosted web client
+ * @param {boolean} [p.web] mention the hosted web client (default true)
  */
-export function buildInviteMessage({ chatFqdn, token, singleUse, name, meshInvite, web = false }) {
+export function buildInviteMessage({ chatFqdn, token, singleUse, name, meshInvite, web = true }) {
   const user = suggestUsername(name);
   const hi = name ? `Hey ${name}!` : "Hey!";
   const L = [];

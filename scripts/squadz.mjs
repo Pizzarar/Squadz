@@ -34,9 +34,10 @@ Usage: node scripts/squadz.mjs <command> [options]
   setup [--force] [--domain D] [--cloudflare-token T] [--mesh-ip IP] [--email E] [--admin-user U]
         Write .env (prompts for anything not given as a flag). Refuses to overwrite .env without --force.
   doctor                       Check DNS, ports, TLS, well-known, Matrix, lk-jwt and containers.
-  invite [--name HINT] [--shared] [--mesh-invite URL] [--web]
+  invite [--name HINT] [--shared] [--mesh-invite URL] [--no-web]
         Print a pasteable onboarding message with a single-use registration token
-        (--shared uses TUWUNEL_REGISTRATION_TOKEN from .env instead).
+        (--shared uses TUWUNEL_REGISTRATION_TOKEN from .env instead). The message
+        links the hosted web client (https://CHAT_FQDN/); --no-web omits it.
   role <user> owner|mod|member Set power level (100/50/0) in the Space and every room. Idempotent.
   sync-members                 Invite every local user to the Space (fallback if auto-join missed someone).
   backup [--out DIR]           Cold snapshot of the Tuwunel DB + .env + config into a dated tar.gz.
@@ -233,7 +234,7 @@ async function cmdInvite(flags) {
   console.log("\n----- copy from here -----\n");
   console.log(buildInviteMessage({
     chatFqdn: config.serverName, token, singleUse, name: flags.name,
-    meshInvite: flags["mesh-invite"], web: !!flags.web,
+    meshInvite: flags["mesh-invite"], web: !flags["no-web"],
   }));
   console.log("\n----- to here -----");
   if (!singleUse) console.error("\nnote: this is the shared registration token (anyone with it can sign up). Rotate it in .env and `docker compose up -d` once everyone has joined.");
