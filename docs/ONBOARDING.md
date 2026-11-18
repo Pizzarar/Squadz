@@ -92,6 +92,10 @@ In any room:
 2. Look under **custom emoji** for `:squadz:`, `:wave:`, `:party:`, `:gg:`.
 3. Type `:squadz:` (or the start of a shortcode) to autocomplete.
 
+Want your own emoji or sticker? Send the image (png, gif, webp or jpg, under 256KB
+for an emoji, 512KB for a sticker) and the shortcode you want to Aub, who can add
+it for everyone with `squadz emoji add`.
+
 > Custom emoji are Matrix "image packs" (MSC2545). Support varies by client and
 > version:
 > - **The Squadz web client (Cinny, at `https://CHAT_FQDN/`)** shows the pack in

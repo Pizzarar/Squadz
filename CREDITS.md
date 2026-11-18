@@ -11,6 +11,7 @@ Squadz is glue around these open-source projects. Nothing here is copied code un
 
 ## Features
 - Implemented hosted web client (Cinny served from Caddy, locked config.json, Element Call iframe headers) — Thanks to Cinny by cinnyapp
+- Implemented emoji/sticker CLI (MSC2545 usage) — Thanks to MSC2545 by the Matrix.org community
 - Implemented custom emoji packs (MSC2545 `im.ponies.room_emotes`) — Thanks to MSC2545 by the Matrix.org community
 - Implemented call rooms and `call.member` events (MSC3401/MSC4143/MSC4196) — Thanks to MatrixRTC by the Matrix.org community
 - Implemented soundboard bot session handling (protocol checked, no code copied) — Thanks to matrix-js-sdk by matrix-org, lk-jwt-service by element-hq and node-sdks by LiveKit
