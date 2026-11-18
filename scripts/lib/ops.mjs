@@ -481,9 +481,9 @@ const q = (s) => (/[\s"\\]/.test(s) ? `"${s.replace(/(["\\])/g, "\\$1")}"` : s);
  *
  * Unit files are line-oriented (`Setting=value` per line) and `%` introduces a
  * systemd specifier, so a newline/NUL/control character cannot be represented
- * at all, a leading `-` reads as an ExecStart failure prefix, and `%` must be
- * doubled. Throws a message naming the offending input; returns the escaped
- * value.
+ * at all, a leading `-` reads as an ExecStart failure prefix, a relative path
+ * would resolve against systemd's own cwd, and `%` must be doubled. Throws a
+ * message naming the offending input; returns the escaped value.
  */
 function unitValue(field, value) {
   const s = String(value ?? "");
@@ -493,6 +493,7 @@ function unitValue(field, value) {
   if (/[\r\n]/.test(s)) throw new Error(`${field}: a newline cannot be written to a systemd unit ${show}`);
   if (/[\x01-\x1f\x7f]/.test(s)) throw new Error(`${field}: control characters cannot be written to a systemd unit ${show}`);
   if (s.startsWith("-")) throw new Error(`${field}: must not start with "-" (systemd reads it as a command prefix) ${show}`);
+  if (!s.startsWith("/")) throw new Error(`${field}: must be an absolute path ${show}`);
   return s.replace(/%/g, "%%");
 }
 
@@ -517,7 +518,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=${q(dir)}
+WorkingDirectory=${dir}
 ExecStart=${q(docker)} compose up -d
 ExecStop=${q(docker)} compose stop
 TimeoutStartSec=300
@@ -531,7 +532,7 @@ After=docker.service squadz.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=${q(dir)}
+WorkingDirectory=${dir}
 ExecStart=${q(node)} ${q(script)} backup --keep ${keep}
 `,
     "squadz-backup.timer": `[Unit]
