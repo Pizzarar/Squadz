@@ -78,11 +78,12 @@ export function buildFfmpegArgs(filePath) {
  * @param {typeof defaultSpawn} [opts.spawnImpl=defaultSpawn]
  * @param {string} [opts.ffmpegBin='ffmpeg']
  * @param {AbortSignal} [opts.signal]
+ * @param {number} [opts.maxBytes=Infinity]  kill ffmpeg and reject (`code: 'PCM_TOO_LARGE'`) once stdout exceeds this
  * @returns {Promise<Buffer>}
  */
 export function decodeClipToPcm(
   filePath,
-  { spawnImpl = defaultSpawn, ffmpegBin = 'ffmpeg', signal } = {}
+  { spawnImpl = defaultSpawn, ffmpegBin = 'ffmpeg', signal, maxBytes = Infinity } = {}
 ) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -111,7 +112,21 @@ export function decodeClipToPcm(
     };
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    proc.stdout.on('data', (chunk) => stdoutChunks.push(Buffer.from(chunk)));
+    let stdoutBytes = 0;
+    proc.stdout.on('data', (chunk) => {
+      if (settled) return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maxBytes) {
+        try {
+          proc.kill('SIGKILL');
+        } catch {}
+        const err = new Error(`decoded audio exceeds ${maxBytes} bytes`);
+        err.code = 'PCM_TOO_LARGE';
+        finish(reject, err);
+        return;
+      }
+      stdoutChunks.push(Buffer.from(chunk));
+    });
     proc.stderr.on('data', (chunk) => stderrChunks.push(Buffer.from(chunk)));
 
     proc.on('error', (err) => finish(reject, err));

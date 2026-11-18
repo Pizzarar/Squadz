@@ -35,6 +35,17 @@ describe('decodeClipToPcm abort', () => {
     assert.equal(proc.killed, 'SIGKILL');
   });
 
+  it('kills ffmpeg and rejects once decoded stdout exceeds maxBytes', async () => {
+    const { proc, spawnImpl } = fakeSpawn();
+    const p = decodeClipToPcm('x.mp3', { spawnImpl, maxBytes: 100 });
+    proc.stdout.emit('data', Buffer.alloc(60));
+    assert.equal(proc.killed, null);
+    proc.stdout.emit('data', Buffer.alloc(60));
+    await assert.rejects(p, { code: 'PCM_TOO_LARGE' });
+    assert.equal(proc.killed, 'SIGKILL');
+    proc.emit('close', 0); // late close after kill is ignored
+  });
+
   it('does not spawn ffmpeg when already aborted', async () => {
     let spawned = false;
     const ac = new AbortController();

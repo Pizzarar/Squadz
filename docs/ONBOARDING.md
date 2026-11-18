@@ -62,7 +62,7 @@ Once signed in:
 2. Open **Squadz**. You'll see the rooms inside:
    - **General** — day-to-day chat
    - **Games** — game talk and scheduling
-   - **Clips** — the soundboard bot (`!sb play <clip>`)
+   - **Clips** — the soundboard bot (`!sb play <clip>`, `!sb list`). To add your own sound, upload an audio file (mp3, ogg/opus or wav, ≤ 1 MB, ≤ 15 s) here, then **reply** to it with `!sb add <name>` (`a-z 0-9 _ -`, up to 32 chars). Moderators can also `!sb remove <name>` or `!sb add <name> --replace`.
    - **Memes** — memes
    - **Lounge** and **Game Night** — voice rooms (see below)
 

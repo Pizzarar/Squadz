@@ -157,4 +157,72 @@ export class MatrixClient {
       { body: content }
     );
   }
+
+  /** Fetch a single event (`GET /rooms/{room}/event/{id}`). */
+  async getEvent(roomId, eventId) {
+    return this._request(
+      'GET',
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`
+    );
+  }
+
+  /**
+   * Download media via the authenticated endpoint (`/_matrix/client/v1/media/download`), falling
+   * back to the legacy `/_matrix/media/v3/download` on 400/404/405. Aborts past `maxBytes`.
+   *
+   * @param {string} server
+   * @param {string} mediaId
+   * @param {{ maxBytes?: number }} [opts]
+   * @returns {Promise<Buffer>}
+   */
+  async downloadMedia(server, mediaId, { maxBytes = Infinity } = {}) {
+    const s = encodeURIComponent(server);
+    const m = encodeURIComponent(mediaId);
+    const paths = [`/_matrix/client/v1/media/download/${s}/${m}`, `/_matrix/media/v3/download/${s}/${m}`];
+    let lastErr;
+    for (const p of paths) {
+      const res = await this.fetchImpl(`${this.homeserverUrl}${p}`, {
+        method: 'GET',
+        headers: this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {},
+      });
+      if (!res.ok) {
+        lastErr = new Error(`Matrix GET ${p} failed (${res.status})`);
+        lastErr.status = res.status;
+        if ([400, 404, 405].includes(res.status)) continue;
+        throw lastErr;
+      }
+      const declared = Number(res.headers?.get?.('content-length'));
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        await res.body?.cancel?.().catch(() => {});
+        throw tooLarge(maxBytes);
+      }
+      const chunks = [];
+      let total = 0;
+      if (res.body && typeof res.body.getReader === 'function') {
+        const reader = res.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.length;
+          if (total > maxBytes) {
+            await reader.cancel().catch(() => {});
+            throw tooLarge(maxBytes);
+          }
+          chunks.push(Buffer.from(value));
+        }
+      } else {
+        const all = Buffer.from(await res.arrayBuffer());
+        if (all.length > maxBytes) throw tooLarge(maxBytes);
+        chunks.push(all);
+      }
+      return Buffer.concat(chunks);
+    }
+    throw lastErr;
+  }
+}
+
+function tooLarge(maxBytes) {
+  const err = new Error(`media larger than ${maxBytes} bytes`);
+  err.code = 'TOO_LARGE';
+  return err;
 }
