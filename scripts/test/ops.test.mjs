@@ -154,10 +154,15 @@ test("invite: issues a single-use token via the admin room and builds the messag
   assert.equal(r.token, "tok2");
 
   const msg = buildInviteMessage({ chatFqdn: SERVER, token: r.token, singleUse: true, name: "Sam", meshInvite: "https://login.tailscale.com/uinv/abc" });
-  for (const needle of ["Hey Sam!", "Tailscale", "Element X", SERVER, "tok2", "works once", "https://login.tailscale.com/uinv/abc", "Squadz", "(e.g. sam)"]) {
+  for (const needle of ["Hey Sam!", "Tailscale", "Element X", SERVER, "tok2", "works once", "https://login.tailscale.com/uinv/abc", "Squadz", "(e.g. sam)", `open https://${SERVER}/ in a browser`]) {
     assert.ok(msg.includes(needle), `message mentions ${needle}`);
   }
   assert.ok(!msg.includes("shared-token"));
+
+  // The hosted web client (Cinny) is the default; --no-web (web:false) omits it.
+  const noWeb = buildInviteMessage({ chatFqdn: SERVER, token: r.token, singleUse: true, name: "Sam", web: false });
+  assert.ok(!noWeb.includes(`https://${SERVER}/`), "web:false omits the web link");
+  assert.ok(noWeb.includes("Element (https://element.io/download)."), "web:false keeps the desktop-app sentence");
 });
 
 test("invite --shared uses the .env token; admin-room failure falls back with a warning", async () => {

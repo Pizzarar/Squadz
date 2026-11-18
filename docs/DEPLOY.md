@@ -84,7 +84,7 @@ node scripts/squadz.mjs invite --name Sam --mesh-invite <TAILSCALE_INVITE_LINK>
 node scripts/squadz.mjs invite --name Alex --mesh-invite <TAILSCALE_INVITE_LINK>
 ```
 
-Each prints a pasteable message (join the tailnet, install Element X / Element, server `chat.<DOMAIN>`, a registration token, what they will see). Friends **pick their own usernames**. Tokens are **single-use** (`!admin token issue --once`, Tuwunel `src/admin/token`): once one friend registers with it, it is dead. If the admin room does not answer, `invite` says so and falls back to the shared `TUWUNEL_REGISTRATION_TOKEN`; use `--shared` to force that. Rotate the shared token in `.env` afterwards.
+Each prints a pasteable message (join the tailnet, install Element X / Element, server `chat.<DOMAIN>`, a registration token, what they will see). Invite messages also link the hosted web client (Cinny) at `https://chat.<DOMAIN>/`; pass `--no-web` to omit it. Friends **pick their own usernames**. Tokens are **single-use** (`!admin token issue --once`, Tuwunel `src/admin/token`): once one friend registers with it, it is dead. If the admin room does not answer, `invite` says so and falls back to the shared `TUWUNEL_REGISTRATION_TOKEN`; use `--shared` to force that. Rotate the shared token in `.env` afterwards.
 
 Create the Tailscale invite link in the Tailscale admin console (Users > Invite external users), or share the host machine with them (Machines > Share).
 
