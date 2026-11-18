@@ -404,8 +404,8 @@ check('Tuwunel, LiveKit, lk-jwt-service, and soundboard configs match contract',
   assert(sb.profiles.includes('bots'), 'soundboard service must have profiles: [bots]');
   assert(sb.build === './bots/soundboard', `soundboard build must be ./bots/soundboard (got ${sb.build})`);
   assert(
-    sb.volumes.includes('${SOUNDBOARD_CLIPS_DIR}:/clips:ro'),
-    'soundboard must mount ${SOUNDBOARD_CLIPS_DIR}:/clips:ro'
+    sb.volumes.includes('${SOUNDBOARD_CLIPS_DIR}:/clips'),
+    'soundboard must mount ${SOUNDBOARD_CLIPS_DIR}:/clips read-write (!sb add saves uploads there)'
   );
   assert(sb.environment.CHAT_FQDN === '${CHAT_FQDN}', 'soundboard must receive CHAT_FQDN');
   assert(sb.environment.RTC_FQDN === '${RTC_FQDN}', 'soundboard must receive RTC_FQDN');

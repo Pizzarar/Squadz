@@ -4,7 +4,18 @@
 //
 // Commands are read ONLY in the unencrypted #clips room. The voice rooms are E2EE, so the bot
 // never needs to read their timelines; it only reads their (unencrypted) state events.
-import { parseCommand } from './commands.js';
+import { parseCommand, stripReplyFallback } from './commands.js';
+import {
+  MAX_CLIP_BYTES,
+  MAX_CLIP_SECONDS,
+  MOD_POWER_LEVEL,
+  detectAudioFormat,
+  parseMxc,
+  powerLevelOf,
+  removeClipFiles,
+  saveClipAtomic,
+} from './upload.js';
+import { BYTES_PER_SAMPLE, CHANNELS, SAMPLE_RATE } from './audio.js';
 import { ClipRegistry } from './clips.js';
 import {
   DEFAULT_EXPIRES_MS,
@@ -116,10 +127,11 @@ export class SoundboardBot {
       if (!ev || ev.type !== 'm.room.message') continue;
       if (ev.sender === this.matrix.userId) continue;
       if (ev.content?.msgtype !== 'm.text') continue;
-      const cmd = parseCommand(ev.content?.body);
+      const replyTo = ev.content?.['m.relates_to']?.['m.in_reply_to']?.event_id;
+      const cmd = parseCommand(replyTo ? stripReplyFallback(ev.content?.body) : ev.content?.body);
       if (!cmd) continue;
       try {
-        await this.handleCommand(commandRoomId, cmd);
+        await this.handleCommand(commandRoomId, cmd, { sender: ev.sender, replyToEventId: replyTo });
       } catch (err) {
         this.logger.error?.(`[soundboard] Error handling command: ${err.message}`);
       }
@@ -131,13 +143,14 @@ export class SoundboardBot {
    * command is acknowledged; playback runs in the background (await `whenIdle()` in tests).
    *
    * @param {string} replyRoomId
-   * @param {{ action: 'list' | 'play' | 'stop' | 'help', clip?: string, room?: string, error?: string }} cmd
+   * @param {{ action: 'list' | 'play' | 'stop' | 'add' | 'remove' | 'help', clip?: string, replace?: boolean, room?: string, error?: string }} cmd
+   * @param {{ sender?: string, replyToEventId?: string }} [ctx]
    */
-  async handleCommand(replyRoomId, cmd) {
+  async handleCommand(replyRoomId, cmd, ctx = {}) {
     const say = (text) => this.matrix.sendNotice(replyRoomId, text);
 
     if (cmd.action === 'help') {
-      await say(`${cmd.error}. Commands: !sb list | !sb play <clip> [in <room>] | !sb stop [in <room>]`);
+      await say(`${cmd.error}. Commands: !sb list | !sb play <clip> [in <room>] | !sb stop [in <room>] | !sb add <name> [--replace] (reply to an audio message) | !sb remove <name>`);
       return;
     }
 
@@ -174,6 +187,21 @@ export class SoundboardBot {
       return;
     }
 
+    if (cmd.action === 'add') {
+      await say(await this._addClip(replyRoomId, cmd, ctx));
+      return;
+    }
+
+    if (cmd.action === 'remove') {
+      if (!(await this._isMod(replyRoomId, ctx.sender))) {
+        await say(`Only moderators (power level ${MOD_POWER_LEVEL}+) can remove clips.`);
+        return;
+      }
+      const n = removeClipFiles(this.clips.clipsDir, cmd.clip);
+      await say(n > 0 ? `Removed clip "${cmd.clip}".` : `Unknown clip "${cmd.clip}".`);
+      return;
+    }
+
     if (cmd.action === 'play') {
       const filePath = this.clips.resolve(cmd.clip);
       if (!filePath) {
@@ -191,6 +219,81 @@ export class SoundboardBot {
       }
       this._startPlayback(res.roomId, filePath, replyRoomId);
     }
+  }
+
+  /** True if `userId` has power level >= 50 in `roomId` (reads m.room.power_levels + m.room.create). */
+  async _isMod(roomId, userId) {
+    if (!userId) return false;
+    const state = await this.matrix.getRoomState(roomId);
+    const pl = state.find((e) => e.type === 'm.room.power_levels' && e.state_key === '');
+    const create = state.find((e) => e.type === 'm.room.create');
+    return powerLevelOf(userId, pl?.content, create) >= MOD_POWER_LEVEL;
+  }
+
+  /**
+   * `!sb add`: download the audio message the command replies to, validate and save it.
+   * @returns {Promise<string>} the notice to send
+   */
+  async _addClip(roomId, cmd, ctx) {
+    const reject = (why) => `Rejected "${cmd.clip}": ${why}`;
+    const maxMb = MAX_CLIP_BYTES / 1024 / 1024;
+    if (!ctx.replyToEventId) {
+      return reject("reply to an audio message with !sb add <name> (use your client's reply action).");
+    }
+    if (cmd.replace && !(await this._isMod(roomId, ctx.sender))) {
+      return reject(`--replace needs moderator power level ${MOD_POWER_LEVEL}+.`);
+    }
+    if (!cmd.replace && this.clips.resolve(cmd.clip)) {
+      return reject('a clip with that name already exists (a moderator can use --replace).');
+    }
+
+    let target;
+    try {
+      target = await this.matrix.getEvent(roomId, ctx.replyToEventId);
+    } catch (err) {
+      return reject(`could not read the replied-to message (${err.message}).`);
+    }
+    const c = target?.content ?? {};
+    const looksAudio =
+      c.msgtype === 'm.audio' ||
+      (c.msgtype === 'm.file' &&
+        (/^audio\//i.test(c.info?.mimetype ?? '') || /\.(mp3|ogg|opus|wav)$/i.test(c.filename ?? c.body ?? '')));
+    if (!looksAudio) return reject('the replied-to message is not an audio file.');
+    const mxc = parseMxc(c.url);
+    if (!mxc) return reject('the audio is not available (encrypted or missing media URL).');
+    if (Number(c.info?.size) > MAX_CLIP_BYTES) return reject(`file is larger than ${maxMb} MB.`);
+
+    let data;
+    try {
+      data = await this.matrix.downloadMedia(mxc.server, mxc.mediaId, { maxBytes: MAX_CLIP_BYTES });
+    } catch (err) {
+      if (err.code === 'TOO_LARGE') return reject(`file is larger than ${maxMb} MB.`);
+      return reject(`download failed (${err.message}).`);
+    }
+    if (data.length === 0) return reject('the file is empty.');
+    const fmt = detectAudioFormat(data);
+    if (!fmt) return reject('unsupported format (only mp3, ogg/opus and wav are allowed).');
+
+    let seconds = 0;
+    try {
+      await saveClipAtomic(this.clips.clipsDir, cmd.clip, data, fmt.ext, {
+        replace: cmd.replace,
+        validate: async (tmpPath) => {
+          const pcm = await this.decodeClip(tmpPath);
+          if (!pcm || pcm.length === 0) throw userError('the audio could not be decoded or is empty.');
+          seconds = pcm.length / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE);
+          if (seconds > MAX_CLIP_SECONDS) {
+            throw userError(`clip is ${seconds.toFixed(1)} s long (max ${MAX_CLIP_SECONDS} s).`);
+          }
+        },
+      });
+    } catch (err) {
+      if (err.userMessage) return reject(err.userMessage);
+      if (err.code === 'EEXISTS') return reject('a clip with that name already exists (a moderator can use --replace).');
+      this.logger.error?.(`[soundboard] Saving clip failed: ${err.message}`);
+      return reject(`could not save (${err.message}).`);
+    }
+    return `Saved clip "${cmd.clip}" (${fmt.kind}, ${seconds.toFixed(1)} s). Play it with !sb play ${cmd.clip}`;
   }
 
   _describeResolveFailure(res, requested) {
@@ -429,4 +532,10 @@ export class SoundboardBot {
       await session.disconnect();
     }
   }
+}
+
+function userError(message) {
+  const err = new Error(message);
+  err.userMessage = message;
+  return err;
 }

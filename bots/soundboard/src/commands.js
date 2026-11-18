@@ -1,4 +1,5 @@
 // Parses soundboard chat commands (`!sb ...`).
+import { CLIP_NAME_RE } from './upload.js';
 
 /**
  * Parse a Matrix m.room.message body for a `!sb` command.
@@ -7,11 +8,13 @@
  *   - `!sb` / `!sb list` / `!sb help` -> `{ action: 'list' }`
  *   - `!sb play <clip> [in <room>]`   -> `{ action: 'play', clip: '<clip>', room?: '<room>' }`
  *   - `!sb stop [in <room>]`          -> `{ action: 'stop', room?: '<room>' }`
+ *   - `!sb add <name> [--replace]`   -> `{ action: 'add', clip, replace }` (sent as a reply to an audio message)
+ *   - `!sb remove <name>`             -> `{ action: 'remove', clip }`
  *   - Any other `!sb ...`             -> `{ action: 'help', error: '...' }`
  *   - Non-`!sb` message               -> `null`
  *
  * @param {string} body
- * @returns {{ action: 'list' | 'play' | 'stop' | 'help', clip?: string, room?: string, error?: string } | null}
+ * @returns {{ action: 'list' | 'play' | 'stop' | 'add' | 'remove' | 'help', clip?: string, replace?: boolean, room?: string, error?: string } | null}
  */
 export function parseCommand(body) {
   if (typeof body !== 'string') return null;
@@ -49,6 +52,24 @@ export function parseCommand(body) {
     return room ? { action: 'play', clip, room } : { action: 'play', clip };
   }
 
+  if (sub === 'add' || sub === 'remove') {
+    const flags = tokens.slice(2).filter((t) => t.startsWith('--'));
+    const args = tokens.slice(2).filter((t) => !t.startsWith('--'));
+    const allowed = sub === 'add' ? ['--replace'] : [];
+    const usage =
+      sub === 'add'
+        ? 'Usage: !sb add <name> [--replace] (as a reply to an audio message)'
+        : 'Usage: !sb remove <name>';
+    if (args.length !== 1 || flags.some((f) => !allowed.includes(f.toLowerCase()))) {
+      return { action: 'help', error: usage };
+    }
+    const clip = args[0];
+    if (!CLIP_NAME_RE.test(clip)) {
+      return { action: 'help', error: `Invalid clip name "${clip}": use 1-32 characters from a-z 0-9 _ -` };
+    }
+    return sub === 'add' ? { action: 'add', clip, replace: flags.length > 0 } : { action: 'remove', clip };
+  }
+
   return { action: 'help', error: `Unknown subcommand: ${sub}` };
 }
 
@@ -75,4 +96,19 @@ function parseInRoom(rest) {
   if (rest.length === 0) return null;
   if (rest[0].toLowerCase() !== 'in' || rest.length < 2) return false;
   return rest.slice(1).join(' ');
+}
+
+/**
+ * Strip the legacy reply fallback (`> <@user> quoted...` lines + blank line) that some clients
+ * prepend to the body of a reply.
+ * @param {string} body
+ */
+export function stripReplyFallback(body) {
+  if (typeof body !== 'string') return body;
+  const lines = body.split('\n');
+  let i = 0;
+  while (i < lines.length && lines[i].startsWith('>')) i++;
+  if (i === 0) return body;
+  if (lines[i] === '') i++;
+  return lines.slice(i).join('\n');
 }

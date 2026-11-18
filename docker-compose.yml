@@ -98,7 +98,7 @@ services:
       SOUNDBOARD_MATRIX_PASSWORD: "${SOUNDBOARD_MATRIX_PASSWORD}"
       SOUNDBOARD_CLIPS_DIR: "/clips"
     volumes:
-      - "${SOUNDBOARD_CLIPS_DIR}:/clips:ro"
+      - "${SOUNDBOARD_CLIPS_DIR}:/clips"
     extra_hosts:
       - "${CHAT_FQDN}:${MESH_IP}"
       - "${RTC_FQDN}:${MESH_IP}"
