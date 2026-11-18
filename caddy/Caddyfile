@@ -42,7 +42,7 @@ https://{$CHAT_FQDN} {
 
 	# Go-live high-FPS screen-share web app (Block B4)
 	handle /golive {
-		redir /golive/ 308
+		redir * /golive/ 308
 	}
 	handle_path /golive/* {
 		root * /srv/golive

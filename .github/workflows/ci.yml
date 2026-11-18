@@ -55,6 +55,7 @@ jobs:
           sed -i 's|^LIVEKIT_API_KEY=.*|LIVEKIT_API_KEY=devkey|' .env
           sed -i 's|^LIVEKIT_API_SECRET=.*|LIVEKIT_API_SECRET=secret_that_is_at_least_32_characters_long_for_livekit|' .env
           sed -i 's|^TUWUNEL_REGISTRATION_TOKEN=.*|TUWUNEL_REGISTRATION_TOKEN=ci_test_reg_token|' .env
+          sed -i 's|^CLOUDFLARE_API_TOKEN=.*|CLOUDFLARE_API_TOKEN=ciDummyCloudflareTokenNotRealXXXXXXXXXX1234|' .env
           mkdir -p web/golive bots/soundboard/clips
 
       - name: Validate docker compose config
