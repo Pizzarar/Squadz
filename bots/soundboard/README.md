@@ -9,6 +9,10 @@ Send in **#clips** (the unencrypted room of the Squadz Space; commands in any ot
 - `!sb` or `!sb list` — list available clip names from `/clips`
 - `!sb play <clip> [in <room>]` — play `<clip>` into a voice room's MatrixRTC call. The target is the room named after `in` (display name or alias, e.g. `in game night`), else the single voice room in the Space with an active call, else the bot asks which room you mean.
 - `!sb stop [in <room>]` — stop playback immediately (all rooms, or just the named one)
+- `!sb add <name> [--replace]` — **send as a reply to an audio message** (`m.audio`, or an `m.file` with an audio mimetype/extension) in #clips; the caption form is not supported. The bot downloads it (authenticated `/_matrix/client/v1/media/download`, falling back to `/_matrix/media/v3/download`), validates it and saves it to `/clips`; it is playable immediately because the clip list is re-read from disk on every command. Replies with a notice saying saved or why it was rejected. Rules: name `[a-z0-9_-]{1,32}`; format checked by magic bytes (mp3, ogg/opus, wav; the mimetype is ignored); size ≤ 1 MB; duration ≤ 15 s (measured by decoding with the same ffmpeg path playback uses); an existing name is refused unless `--replace`. Anyone may add a new name.
+- `!sb remove <name>` — delete a clip. `--replace` and `remove` need power level ≥ 50 (moderator) in #clips (read from `m.room.power_levels`; room v12 creators count as unlimited).
+
+Uploads are written to a temp file (`.name.<rand>.tmp`) and renamed into place, so a partial file is never listed or played. The clips volume is mounted read-write (`${SOUNDBOARD_CLIPS_DIR}:/clips`) and the container runs as uid 1000 (`node`), so the host directory must be writable by it: `chown 1000:1000 bots/soundboard/clips` (or `chmod a+rwx`). The bundled starter clips (`beep.wav`) stay in that directory.
 
 Playback runs in the background, so `stop` works mid-clip; one clip plays per voice room at a time (a new `play` preempts the old one) and stopping/shutdown kills the ffmpeg decode. The bot only joins when a human has an active MatrixRTC membership. It refreshes its `call.member` `expires` (keeping `created_ts`) while connected, cleans up if the SFU drops the connection, and after the idle timeout (default `60s`) or on shutdown disconnects and posts `{}` to clear its `org.matrix.msc3401.call.member` state. `room` sent to lk-jwt-service `/sfu/get` is the Matrix room ID.
 
@@ -30,6 +34,7 @@ Playback runs in the background, so `stop` works mid-clip; one clip plays per vo
 - [`src/audio.js`](./src/audio.js) — Spawns `ffmpeg` (`-f s16le -acodec pcm_s16le -ar 48000 -ac 1 pipe:1`) and slices raw PCM into 20 ms (`960`-sample `Int16Array`) frames.
 - [`src/livekit.js`](./src/livekit.js) — Wraps `@livekit/rtc-node` (`Room`, `AudioSource`, `LocalAudioTrack`, `AudioFrame`) with playback preemption and idle auto-disconnect.
 - [`src/clips.js`](./src/clips.js) & [`src/commands.js`](./src/commands.js) — Clip directory scanner and `!sb` command parser.
+- [`src/upload.js`](./src/upload.js) — `!sb add` helpers: magic-byte validation, atomic save, power-level check.
 - [`clips/beep.wav`](./clips/beep.wav) — Self-generated 0.4 s 880 Hz sine wave test clip (regenerated via `npm run gen-beep`).
 
 ## Protocol & SDK Sources

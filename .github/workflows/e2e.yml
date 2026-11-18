@@ -110,7 +110,10 @@ jobs:
         run: node scripts/e2e/4-prepare-bot.mjs
 
       - name: Start the soundboard bot container
-        run: $COMPOSE --profile bots up -d --build soundboard
+        run: |
+          # The bot runs as uid 1000 and `!sb add` writes into the bind-mounted clips dir.
+          chmod a+rwx bots/soundboard/clips
+          $COMPOSE --profile bots up -d --build soundboard
 
       - name: "E2E 5 - !sb play beep makes the bot join the LiveKit room"
         run: node scripts/e2e/5-bot.mjs
