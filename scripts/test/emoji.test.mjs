@@ -80,6 +80,25 @@ test("sniffImage: rejects text, svg, truncated data", () => {
   assert.equal(sniffImage(Buffer.alloc(0)), null);
 });
 
+test("sniffImage: jpeg marker walk handles truncated, bad-length and padded segments", () => {
+  const full = jpeg(640, 480);
+  // Truncated: SOI + the first APP0 length, but no segment body.
+  assert.equal(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])), null, "truncated APP0 body");
+  // Truncated SOF0: the length fits, but the frame header does not.
+  assert.equal(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x04, 0x08, 0x00, 0x00, 0x00])), null, "SOF too short");
+  // Truncated mid-file: cut before the SOF segment's declared end.
+  assert.equal(sniffImage(full.subarray(0, 26)), null, "cut inside SOF0");
+  // len = 0 / len = 1 are malformed and must not loop (or read past the buffer).
+  assert.equal(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x00, 0, 0, 0, 0, 0, 0])), null, "len = 0");
+  assert.equal(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01, 0, 0, 0, 0, 0, 0])), null, "len = 1");
+  // 0xFF fill bytes before a marker are skipped.
+  const padded = Buffer.concat([full.subarray(0, 20), Buffer.from([0xff, 0xff, 0xff]), full.subarray(20)]);
+  assert.deepEqual(sniffImage(padded), { mimetype: "image/jpeg", w: 640, h: 480 }, "fill bytes");
+  // Standalone markers (RSTn, TEM) before the frame header carry no length.
+  const standalone = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xd0, 0xff, 0x01]), full.subarray(2)]);
+  assert.deepEqual(sniffImage(standalone), { mimetype: "image/jpeg", w: 640, h: 480 }, "standalone markers");
+});
+
 test("validateShortcode: [a-z0-9_]{2,32}", () => {
   for (const ok of ["ab", "party_parrot", "x1", "a".repeat(32)]) assert.equal(validateShortcode(ok), ok);
   for (const bad of ["a", "A1", "has-dash", "sp ace", ":colon:", "a".repeat(33), "", "é1"]) {

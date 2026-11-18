@@ -59,80 +59,60 @@ run(async () => {
       assertEq(a.status, 200, `/golive/${asset} status`);
     }
   });
-  await step("hosted web client (Cinny) at / with SPA fallback and locked config", async () => {
+  await step("hosted web client (Cinny) at /: SPA fallback, locked config, Caddy routes", async () => {
     const root = await fetch(`${cfg.chatUrl}/`);
     assertEq(root.status, 200, "/ status");
+    assert((root.headers.get("content-type") ?? "").includes("text/html"), "/ is text/html");
     const html = await root.text();
+    assert(/<html/i.test(html), "/ is an HTML document");
     assert(/<title>\s*Cinny/i.test(html) || /cinny/i.test(html), "/ returns Cinny's index.html");
-    assertEq(root.headers.get("x-frame-options"), "SAMEORIGIN", "X-Frame-Options");
-    assert(
-      (root.headers.get("content-security-policy") ?? "").includes("frame-ancestors 'self'"),
-      "CSP frame-ancestors 'self'",
-    );
+    assert(/id=["']root["']/.test(html), "/ contains Cinny's #root mount point");
     assert(!root.headers.has("permissions-policy"), "no Permissions-Policy header (breaks screen share)");
 
+    // Locked config: only ours, never cached.
     const conf = await fetch(`${cfg.chatUrl}/config.json`);
     assertEq(conf.status, 200, "/config.json status");
     assert((conf.headers.get("cache-control") ?? "").includes("no-cache"), "config.json is not cached");
     const c = await conf.json();
     assertEq(c.homeserverList, [cfg.chatFqdn], "homeserverList locked to CHAT_FQDN");
     assertEq(c.defaultHomeserver, 0, "defaultHomeserver");
-    assertEq(c.allowCustomHomeservers, false, "allowCustomHomeservers");
+    assertEq(c.allowCustomHomeservers, false, "allowCustomHomeservers locked");
     assertEq(c.featuredCommunities?.rooms, [], "no featured public rooms");
 
-    const deep = await fetch(`${cfg.chatUrl}/some/deep/link`);
-    assertEq(deep.status, 200, "SPA fallback status");
-    assert((await deep.text()).includes("<html"), "SPA fallback serves index.html");
-
-    const ec = await fetch(`${cfg.chatUrl}/public/element-call/index.html`);
-    assertEq(ec.status, 200, "bundled Element Call widget status");
-
-    // Cinny's catch-all must not shadow the other routes.
-    const v = await fetch(`${cfg.chatUrl}/_matrix/client/versions`);
-    assert(Array.isArray((await v.json()).versions), "/_matrix still proxied to Tuwunel");
-    const wk = await fetch(`${cfg.chatUrl}/.well-known/matrix/client`);
-    assert(Boolean((await wk.json())["org.matrix.msc4143.rtc_foci"]), "well-known still served");
-    const g = await fetch(`${cfg.chatUrl}/golive/`);
-    assertEq(g.status, 200, "/golive/ still served");
-  });
-  await step("C7: hosted web client + Caddy route assertions", async () => {
-    const root = await fetch(`${cfg.chatUrl}/`);
-    assertEq(root.status, 200, "/ status");
-    assert((root.headers.get("content-type") ?? "").includes("text/html"), "/ is text/html");
-    const html = await root.text();
-    assert(/id=["']root["']/.test(html), "/ contains Cinny's #root mount point");
-
-    // SPA fallback for history-routed deep links returns the same index.
-    for (const p of ["/home/", "/home/some-room"]) {
+    // History-routed deep links get the exact same SPA index back.
+    for (const p of ["/some/deep/link", "/home/", "/home/some-room"]) {
       const d = await fetch(`${cfg.chatUrl}${p}`);
       assertEq(d.status, 200, `${p} SPA fallback status`);
       assertEq(await d.text(), html, `${p} serves the SPA index`);
     }
 
-    // Locked config.
-    const c = await (await fetch(`${cfg.chatUrl}/config.json`)).json();
-    assertEq(c.homeserverList, [cfg.chatFqdn], "homeserverList");
-    assertEq(c.allowCustomHomeservers, false, "server locked");
-
     // Frame headers: same-origin framing allowed (Element Call widget), cross-origin denied.
     for (const p of ["/", "/public/element-call/index.html"]) {
       const r = await fetch(`${cfg.chatUrl}${p}`);
+      assertEq(r.status, 200, `${p} status`);
       assertEq(r.headers.get("x-frame-options"), "SAMEORIGIN", `${p} X-Frame-Options`);
       assertEq(r.headers.get("content-security-policy"), "frame-ancestors 'self'", `${p} CSP`);
       await r.arrayBuffer();
     }
 
-    // /golive redirect target + trailing slash.
+    // /golive redirects to its trailing-slash form, which is served.
     const rd = await fetch(`${cfg.chatUrl}/golive`, { redirect: "manual" });
-    assertEq(rd.status, 308, "/golive status");
+    assertEq(rd.status, 308, "/golive redirect status");
     assert((rd.headers.get("location") ?? "").endsWith("/golive/"), "/golive Location ends with /golive/");
-    assertEq((await fetch(`${cfg.chatUrl}/golive/`)).status, 200, "/golive/ status");
+    await rd.arrayBuffer();
+    const golive = await fetch(`${cfg.chatUrl}/golive/`);
+    assertEq(golive.status, 200, "/golive/ still served");
 
-    // API routes are not swallowed by the SPA fallback.
+    // Cinny's catch-all must not shadow the API routes.
     const v = await fetch(`${cfg.chatUrl}/_matrix/client/versions`);
+    assertEq(v.status, 200, "/_matrix/client/versions still proxied to Tuwunel");
     assert((v.headers.get("content-type") ?? "").includes("json"), "versions is JSON, not index.html");
+    const versions = (await v.json()).versions;
+    assert(Array.isArray(versions) && versions.length > 0, "versions array is non-empty");
     const wk = await fetch(`${cfg.chatUrl}/.well-known/matrix/client`);
+    assertEq(wk.status, 200, "well-known/matrix/client still served");
     assert((wk.headers.get("content-type") ?? "").includes("json"), "well-known is JSON, not index.html");
+    assert(Boolean((await wk.json())["org.matrix.msc4143.rtc_foci"]), "well-known still carries rtc_foci");
 
     // A hashed asset referenced from index.html is served as JS.
     const m = html.match(/(?:src|href)=["']([^"']+\.js)["']/);
