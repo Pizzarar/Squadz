@@ -17,6 +17,13 @@ database_path = "/var/lib/tuwunel"
 # Private server: disable public Matrix federation
 allow_federation = false
 
+# Phone notifications (docs/SETUP.md "Phone notifications"): Tuwunel POSTs event_id_only pushes to
+# Element's gateway (https://matrix.org/_matrix/push/v1/notify) over normal outbound HTTPS. This
+# does NOT depend on allow_federation (tuwunel src/service/pusher/request.rs uses the pusher HTTP
+# client, not the federation client). Do NOT set ip_range_denylist = [] or push_everything here:
+# the default denylist only blocks private/loopback/CGNAT targets, never matrix.org, and
+# scripts/validate.mjs enforces that nothing in this stack weakens or breaks the push path.
+
 # Token-gated registration: require TUWUNEL_REGISTRATION_TOKEN to sign up
 allow_registration = true
 # Overridden at runtime by TUWUNEL_REGISTRATION_TOKEN=${TUWUNEL_REGISTRATION_TOKEN}

@@ -6,6 +6,7 @@
 
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { checkPushGateway } from "./push.mjs";
 
 import { SPACE, ROOMS } from "./seed.mjs";
 import { toUserId } from "./config.mjs";
@@ -210,6 +211,7 @@ export async function runDoctor(env, io, now = new Date()) {
   results.push(checkVersions(await safe(() => io.getJson(`https://${chat}/_matrix/client/versions`), null)));
   results.push(checkJwtHealth(rtc, await safe(() => io.getStatus(`https://${rtc}/livekit/jwt/healthz`), 0)));
   results.push(checkContainers(await safe(async () => parseComposePs(await io.composePs()), [])));
+  if (io.pushProbe) results.push(checkPushGateway(await safe(() => io.pushProbe(), null)));
   return results;
 }
 

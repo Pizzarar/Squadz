@@ -443,6 +443,22 @@ check('CI e2e overlay: Caddyfile TLS switch defaults to DNS-01, overlay + workfl
   return 'Caddy switch + overlay + workflow verified';
 });
 
+// 8b. Phone notifications (P2 block D5): outbound pushes to Element's gateway must keep working
+check('Push path: federation off, default ip_range_denylist, tuwunel has egress, pusher knobs untouched', () => {
+  const toml = readFileRel('config/tuwunel.toml').replace(/^\s*#.*$/gm, '');
+  const base = readFileRel('docker-compose.yml').replace(/^\s*#.*$/gm, '');
+  assert(/allow_federation\s*=\s*false/.test(toml), 'federation must stay off (pushes do not need it)');
+  for (const k of ['ip_range_denylist', 'push_everything', 'notification_push_path', 'pusher_idle_timeout', 'forbidden_remote_server_names']) {
+    assert(!new RegExp('^\\s*' + k + '\\s*=', 'm').test(toml), `tuwunel.toml must not set ${k} (keep the defaults: matrix.org is public so the default denylist allows it)`);
+    assert(!base.includes('TUWUNEL_' + k.toUpperCase()), `docker-compose.yml must not set TUWUNEL_${k.toUpperCase()}`);
+  }
+  assert(compose.services.tuwunel.network_mode === undefined, 'tuwunel must keep the default compose network (needs outbound HTTPS to the push gateway)');
+  assert(!/internal:\s*true/.test(base), 'no internal-only compose network (would cut tuwunel off from the push gateway)');
+  assert(readFileRel('scripts/lib/push.mjs').includes('https://matrix.org/_matrix/push/v1/notify'), 'scripts/lib/push.mjs must name the Element X push gateway URL');
+  assert(readFileRel('.github/workflows/e2e.yml').includes('2d-push.mjs'), 'e2e workflow must run the push e2e (2d-push.mjs)');
+  return 'federation off, default denylist, egress intact, push e2e wired';
+});
+
 // 9. Hosted web client (P2 block C3b): pinned + checksummed Cinny, locked config, Caddy routing order
 check('Hosted web client: pinned Cinny + sha256, rendered config, Caddy catch-all last', () => {
   const df = readFileRel('caddy/Dockerfile');

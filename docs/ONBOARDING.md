@@ -110,6 +110,16 @@ it for everyone with `squadz emoji add`.
 >   stable `m.room.image_pack` is not widely deployed yet. On a client that
 >   doesn't recognise the pack, the emote appears as an inline image instead.
 
+## 7. Phone notifications
+
+Element X gets notifications through Google (Android) or Apple (iOS) push, relayed by Element's public gateway. Your messages' text never goes through them: the push only says "something new in this room", and the app then fetches the message from the Squadz server.
+
+1. When Element X first asks, **allow notifications** (iOS: Settings > Notifications > Element X; Android 13+: allow the permission prompt and turn off battery optimisation for Element X).
+2. In Element X: **Settings > Notifications** > turn on **Enable notifications for this device**. Use **Troubleshoot notifications** (Android) to run its self-test.
+3. Pick what notifies you under the same screen (all messages / mentions and keywords) and mute noisy rooms from the room's info screen.
+4. **Keep Tailscale (or Meshnet) switched on.** The notification only says a message exists; to show its text the app has to reach the Squadz server, and that works only over the mesh. On iPhone, with the VPN off you get a plain "Notification" with no text; turn the VPN on (use "Always-on"/"Connect on demand" in the Tailscale app) and open the app. Android behaves the same when the fetch fails.
+5. If nothing arrives at all, tell the host: it runs `node scripts/squadz.mjs doctor`.
+
 ## Troubleshooting
 
 - **"Server not found / can't reach homeserver"** — the mesh is off, or you're not

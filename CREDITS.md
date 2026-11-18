@@ -20,3 +20,4 @@ Squadz is glue around these open-source projects. Nothing here is copied code un
 - Implemented `getDisplayMedia` hint notes — Thanks to MDN Web Docs by Mozilla contributors
 - Implemented real-stack e2e CI (internal-TLS overlay, LiveKit twirp/signalling checks, LIVEKIT_INSECURE_SKIP_VERIFY_TLS test switch) — Thanks to Caddy by the Caddy authors (Matthew Holt et al.), lk-jwt-service by element-hq and livekit/protocol by LiveKit
 - Implemented `squadz server` settings + pinned welcome (name/icon/topics, markdown notice) — Thanks to Discord (server settings and welcome screen, design inspiration only, no code borrowed) by Discord Inc.
+- Implemented phone-notification push path (Element X pusher -> matrix.org Sygnal gateway), doctor check and mock-gateway e2e — Thanks to Tuwunel by the matrix-construct contributors (Jason Volk et al.), Element X iOS/Android by Element (element-hq) and Sygnal by Matrix.org Foundation / Element

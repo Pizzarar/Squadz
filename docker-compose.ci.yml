@@ -14,6 +14,24 @@
 # No new ${VAR}s: everything else comes from the .env the workflow writes.
 
 services:
+  # Block D5 push e2e: a mock Matrix push gateway on the compose network. Tuwunel's default
+  # ip_range_denylist blocks private ranges (172.16/12 = the docker bridge) both for literal-IP
+  # pusher URLs and for the resolved peer address (tuwunel src/service/pusher/request.rs), so the
+  # test relaxes it HERE ONLY; production keeps the default (checked by scripts/validate.mjs).
+  push-mock:
+    image: node:22-alpine
+    command: ["node", "/app/mock-push-gateway.mjs"]
+    ports:
+      - "127.0.0.1:8099:8080"
+    volumes:
+      - ./scripts/e2e/mock-push-gateway.mjs:/app/mock-push-gateway.mjs:ro
+
+  tuwunel:
+    environment:
+      TUWUNEL_IP_RANGE_DENYLIST: "[]"
+    depends_on:
+      - push-mock
+
   caddy:
     environment:
       SQUADZ_TLS: "internal_tls"
