@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/squadz.mjs: the one ops entry point for Squadz.
 //
-//   node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|emoji|backup|restore|update> [options]
+//   node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|emoji|server|backup|restore|update> [options]
 //
 // Reuses scripts/lib (config, matrix, seed) and scripts/bootstrap.mjs; the
 // testable logic lives in scripts/lib/ops.mjs. Node 20+, no dependencies.
@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadEnvFile, resolveConfig } from "./lib/config.mjs";
 import { createMatrixClient } from "./lib/matrix.mjs";
+import { parseTopicArg, setServer, showServer } from "./lib/server.mjs";
 import { addEmoji, listEmoji, removeEmoji } from "./lib/emoji.mjs";
 import {
   COPY_ONCE, buildEnvValues, buildInviteMessage, generateSecrets, listUsers, obtainToken,
@@ -47,6 +48,12 @@ Usage: node scripts/squadz.mjs <command> [options]
         Re-adding a shortcode replaces it; other images are kept.
   emoji remove <shortcode>     Remove an emoji/sticker from the pack everywhere.
   emoji list                   List the pack (shortcode, usage, size).
+  server show                  Print the Space name, icon (mxc), every room topic and the pinned welcome event id.
+  server set [--name STR] [--icon FILE] [--icon-all] [--topic ROOM=TEXT]... [--welcome FILE.md]
+        Discord-style server settings, all idempotent. --name renames the Space; --icon sets
+        its avatar (png/jpg/webp, max 2MB; --icon-all also applies it to every room);
+        --topic sets a room topic (repeatable, e.g. --topic general="Chat here");
+        --welcome posts the markdown as a notice in #general and pins it, replacing the old pin.
   backup [--out DIR]           Cold snapshot of the Tuwunel DB + .env + config into a dated tar.gz.
   restore <file> --yes [--with-config]
                                Restore a backup (stops tuwunel, replaces the DB volume).
@@ -60,7 +67,7 @@ Global: --env-file <path> (default ./.env)  -h, --help
 function parseArgs(argv) {
   const flags = {};
   const pos = [];
-  const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "env-file"]);
+  const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "env-file", "icon", "welcome"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h") flags.help = true;
@@ -289,6 +296,45 @@ async function cmdEmoji(flags, pos) {
 }
 
 // ---------------------------------------------------------------------------
+// server show|set
+
+async function cmdServer(flags, pos) {
+  const [sub] = pos;
+  if (!["show", "set"].includes(sub)) throw new Error("usage: server <show | set [--name STR] [--icon FILE] [--icon-all] [--topic ROOM=TEXT]... [--welcome FILE.md]>");
+  const opts = {};
+  if (sub === "set") {
+    if (flags.name !== undefined) opts.name = flags.name;
+    if (flags.icon !== undefined) {
+      if (!fs.existsSync(flags.icon)) throw new Error(`${flags.icon} not found`);
+      opts.icon = { bytes: fs.readFileSync(flags.icon), filename: path.basename(flags.icon) };
+      opts.iconAll = !!flags["icon-all"];
+    } else if (flags["icon-all"]) throw new Error("--icon-all needs --icon <file>");
+    if (flags.topic) opts.topics = flags.topic.map(parseTopicArg);
+    if (flags.welcome !== undefined) {
+      if (!fs.existsSync(flags.welcome)) throw new Error(`${flags.welcome} not found`);
+      opts.welcome = fs.readFileSync(flags.welcome, "utf8");
+      if (!opts.welcome.trim()) throw new Error(`${flags.welcome} is empty`);
+    }
+    if (!Object.keys(opts).length) throw new Error("nothing to set: pass --name, --icon, --topic or --welcome");
+  }
+  loadEnv(flags);
+  const { client, config } = await adminClient();
+  if (sub === "show") {
+    const s = await showServer(client, config);
+    console.log(`name:     ${s.name ?? "(not set)"}`);
+    console.log(`icon:     ${s.avatar ?? "(not set)"}`);
+    console.log(`welcome:  ${s.welcomeEventId ?? "(none pinned)"}`);
+    console.log("topics:");
+    for (const [slug, t] of Object.entries(s.topics)) console.log(`  #${slug}: ${t ?? "(none)"}`);
+    return;
+  }
+  const r = await setServer(client, config, opts);
+  console.log(r.changed.length ? `updated: ${r.changed.join(", ")}` : "nothing to change.");
+  if (r.unchanged.length) console.log(`already up to date: ${r.unchanged.join(", ")}`);
+  if (r.welcome) console.log(`welcome: ${r.welcome.eventId}${r.welcome.posted ? " (posted + pinned)" : " (unchanged)"}`);
+}
+
+// ---------------------------------------------------------------------------
 // backup / restore (cold: stop tuwunel, tar the volume, start it again)
 //
 // Tuwunel does have an online RocksDB backup (`!admin server backup-database`,
@@ -382,6 +428,7 @@ async function main() {
     case "role": return cmdRole(flags, pos);
     case "sync-members": return cmdSyncMembers(flags);
     case "emoji": return cmdEmoji(flags, pos);
+    case "server": return cmdServer(flags, pos);
     case "backup": return cmdBackup(flags);
     case "restore": return cmdRestore(flags, pos);
     case "update": return process.exit(await cmdUpdate(flags));
