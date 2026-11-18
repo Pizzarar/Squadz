@@ -1,0 +1,137 @@
+name: E2E
+
+# Real-stack end-to-end test: the actual docker-compose stack (Caddy + Tuwunel + LiveKit +
+# lk-jwt-service + soundboard bot) on a GitHub-hosted runner, with fake FQDNs and Caddy's internal CA.
+# Docs/plan: docs/plans/P2-ship.md (block C1). Overlay: docker-compose.ci.yml.
+
+on:
+  push:
+    branches: [dev, "unit/**"]
+  pull_request:
+    branches: [dev]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Real-stack e2e (compose + bootstrap + LiveKit + soundboard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE: docker compose -f docker-compose.yml -f docker-compose.ci.yml
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 (global WebSocket for the LiveKit signalling check)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Static validation + e2e helper unit tests
+        run: |
+          node scripts/validate.mjs
+          (cd scripts/e2e && npm test)
+
+      - name: Write throwaway .env, map fake FQDNs to the runner address
+        run: |
+          # A host-reachable (non-loopback) address: containers resolve the FQDNs to it via
+          # extra_hosts, and the runner reaches the published ports on it directly.
+          MESH_IP="$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)"
+          test -n "$MESH_IP"
+          echo "MESH_IP=$MESH_IP"
+          cat > .env <<EOF
+          SQUADZ_DOMAIN=squadz.test
+          CHAT_FQDN=chat.squadz.test
+          RTC_FQDN=rtc.squadz.test
+          MESH_IP=${MESH_IP}
+          ACME_EMAIL=ci@squadz.test
+          CLOUDFLARE_API_TOKEN=unused-in-ci
+          LIVEKIT_API_KEY=devkey
+          LIVEKIT_API_SECRET=ci_livekit_secret_that_is_at_least_32_chars_long
+          TUWUNEL_REGISTRATION_TOKEN=ci-test-registration-token
+          SQUADZ_ADMIN_USER=aub
+          SQUADZ_ADMIN_PASSWORD=ci-admin-password-1
+          SOUNDBOARD_MATRIX_USER=soundboard
+          SOUNDBOARD_MATRIX_PASSWORD=ci-soundboard-password-1
+          SOUNDBOARD_CLIPS_DIR=./bots/soundboard/clips
+          EOF
+          echo "${MESH_IP} chat.squadz.test rtc.squadz.test" | sudo tee -a /etc/hosts
+          grep -E '^[A-Z_]+=' .env >> "$GITHUB_ENV"
+          mkdir -p .e2e
+          touch .e2e/ca-bundle.crt   # placeholder so bind-mount sources exist; replaced below
+          $COMPOSE config -q
+
+      - name: Start Caddy first and export its internal root CA
+        run: |
+          $COMPOSE up -d --no-deps --build caddy
+          for i in $(seq 1 60); do
+            if $COMPOSE cp caddy:/data/caddy/pki/authorities/local/root.crt .e2e/root.crt 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          test -s .e2e/root.crt || { $COMPOSE logs caddy; echo "Caddy internal root CA never appeared"; exit 1; }
+          openssl x509 -in .e2e/root.crt -noout -subject -dates
+          cat /etc/ssl/certs/ca-certificates.crt .e2e/root.crt > .e2e/ca-bundle.crt
+          echo "NODE_EXTRA_CA_CERTS=$PWD/.e2e/root.crt" >> "$GITHUB_ENV"
+
+      - name: Start the real stack (docker compose up -d --build)
+        run: $COMPOSE up -d --build
+
+      - name: Wait for services (via Caddy TLS)
+        run: |
+          wait_for() {
+            for i in $(seq 1 60); do
+              if curl -fsS --cacert .e2e/root.crt "$1" >/dev/null 2>&1; then echo "[OK] $1"; return 0; fi
+              sleep 2
+            done
+            echo "[FAIL] $1 did not respond in 120s"; return 1
+          }
+          wait_for https://chat.squadz.test/_matrix/client/versions
+          wait_for https://rtc.squadz.test/livekit/jwt/healthz
+          wait_for https://rtc.squadz.test/livekit/sfu/
+
+      - name: "E2E 1 - Caddy edge over TLS (well-known, versions, golive)"
+        run: node scripts/e2e/1-edge.mjs
+
+      - name: "E2E 2 - real scripts/bootstrap.mjs twice (topology + idempotence)"
+        run: node scripts/e2e/2-bootstrap.mjs
+
+      - name: "E2E 3 - OpenID -> lk-jwt-service /sfu/get -> LiveKit join"
+        run: node scripts/e2e/3-rtc.mjs
+
+      - name: "E2E 4 - prepare soundboard (account, invites, active call)"
+        run: node scripts/e2e/4-prepare-bot.mjs
+
+      - name: Start the soundboard bot container
+        run: $COMPOSE --profile bots up -d --build soundboard
+
+      - name: "E2E 5 - !sb play beep makes the bot join the LiveKit room"
+        run: node scripts/e2e/5-bot.mjs
+
+      - name: Dump docker compose logs
+        if: always()
+        run: |
+          mkdir -p .e2e
+          $COMPOSE --profile bots ps -a > .e2e/compose-ps.txt 2>&1 || true
+          $COMPOSE --profile bots logs --no-color --timestamps > .e2e/compose.log 2>&1 || true
+          tail -n 200 .e2e/compose.log || true
+
+      - name: Upload compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-compose-logs
+          path: |
+            .e2e/compose.log
+            .e2e/compose-ps.txt
+            .e2e/state.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: $COMPOSE --profile bots down -v

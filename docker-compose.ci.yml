@@ -1,0 +1,33 @@
+# Squadz · CI overlay for the real-stack e2e (.github/workflows/e2e.yml). TEST ONLY.
+# Use: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+#
+# - Caddy issues certs from its own internal CA (`tls internal`) instead of Cloudflare DNS-01.
+#   Switch: caddy/Caddyfile `import {$SQUADZ_TLS:dns_tls}` (Caddy env substitution with default,
+#   https://caddyserver.com/docs/caddyfile/concepts#environment-variables).
+# - .e2e/ca-bundle.crt (system CAs + Caddy's internal root, assembled by the workflow after Caddy
+#   first starts) is mounted into the containers that call https://CHAT_FQDN / https://RTC_FQDN.
+#   Go (lk-jwt-service, scratch image) and Rust/Node (soundboard) read SSL_CERT_FILE;
+#   Node also reads NODE_EXTRA_CA_CERTS.
+# - lk-jwt-service additionally skips TLS verification for its Matrix OpenID lookup
+#   (element-hq/lk-jwt-service v0.4.4 main.go parseConfig: LIVEKIT_INSECURE_SKIP_VERIFY_TLS ==
+#   "YES_I_KNOW_WHAT_I_AM_DOING"), as a belt-and-braces fallback in this throwaway environment.
+# No new ${VAR}s: everything else comes from the .env the workflow writes.
+
+services:
+  caddy:
+    environment:
+      SQUADZ_TLS: "internal_tls"
+
+  lk-jwt-service:
+    environment:
+      SSL_CERT_FILE: "/ca/bundle.crt"
+      LIVEKIT_INSECURE_SKIP_VERIFY_TLS: "YES_I_KNOW_WHAT_I_AM_DOING"
+    volumes:
+      - ./.e2e/ca-bundle.crt:/ca/bundle.crt:ro
+
+  soundboard:
+    environment:
+      SSL_CERT_FILE: "/ca/bundle.crt"
+      NODE_EXTRA_CA_CERTS: "/ca/bundle.crt"
+    volumes:
+      - ./.e2e/ca-bundle.crt:/ca/bundle.crt:ro
