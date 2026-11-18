@@ -22,10 +22,11 @@ import { createMatrixClient } from "./lib/matrix.mjs";
 import { parseTopicArg, setServer, showServer } from "./lib/server.mjs";
 import { probePushGateway } from "./lib/push.mjs";
 import { addEmoji, listEmoji, removeEmoji } from "./lib/emoji.mjs";
+import { InitError, buildOnboardingSummary, formatInitFailure, runInit } from "./lib/init.mjs";
 import {
   COPY_ONCE, buildEnvValues, buildInviteMessage, generateSecrets, listUsers, obtainToken,
   parseMeshIp, parseNordLocalIp, isInternalTls, validateMeshInputs, buildMeshEnvValues, hostsLine,
-  caTrustInstructions, CA_FILE, CADDY_ROOT_CA_PATH, MESH_DEFAULT_CHAT, MESH_DEFAULT_RTC, renderEnv, runDoctor, formatDoctor, setRole, syncMembers, validateSetupInputs,
+  caTrustInstructions, checkContainers, parseComposePs, CA_FILE, CADDY_ROOT_CA_PATH, MESH_DEFAULT_CHAT, MESH_DEFAULT_RTC, renderEnv, runDoctor, formatDoctor, setRole, syncMembers, validateSetupInputs,
   ROLE_LEVELS, backupFileName, buildServiceUnits, parseBackupTime, parseKeep, selectBackupsToPrune,
 } from "./lib/ops.mjs";
 
@@ -73,6 +74,11 @@ Usage: node scripts/squadz.mjs <command> [options]
                                keep 14). Linux + systemd only; install/uninstall need root (uses sudo).
                                --dry-run prints the units and touches nothing.
   update                       docker compose pull, recreate, then doctor.
+  init [--mesh-only] [--dry-run] [setup flags...]
+        One-shot first run: setup -> up -> (mesh: CA export) -> bootstrap -> restart tuwunel -> doctor -> first
+        invite, then prints the friend-onboarding summary. Resumable: finished steps are detected and skipped.
+        Stops at the first failure and prints the exact command to run next. --dry-run prints the plan only.
+        Mesh mode passes squadz-ca.crt to bootstrap automatically (no manual NODE_EXTRA_CA_CERTS).
 
 Global: --env-file <path> (default ./.env)  -h, --help
 `;
@@ -189,6 +195,7 @@ async function cmdSetup(flags) {
     console.log(`\nWrote ${envFile} (mode 600). Secrets were generated and are stored only there.`);
     console.log(`\nCopy this now; it is the only time it is printed (also readable in .env):`);
     for (const k of COPY_ONCE) console.log(`  ${k}=${secrets[k]}`);
+    if (flags["no-next"]) return;
     console.log(`\nNext:`);
     console.log(`  1. In Cloudflare create DNS-only A records: chat.${domain} and rtc.${domain} -> ${meshIp}`);
     console.log(`  2. docker compose up -d`);
@@ -222,6 +229,7 @@ async function setupMesh(flags, envFile, ask) {
   console.log(`\nWrote ${envFile} (mode 600), mesh-only mode (SQUADZ_TLS=internal, no Cloudflare token).`);
   console.log(`\nCopy this now; it is the only time it is printed (also readable in .env):`);
   for (const k of COPY_ONCE) console.log(`  ${k}=${secrets[k]}`);
+  if (flags["no-next"]) return;
   console.log(`\nNext:`);
   console.log(`  1. Hosts entry on THIS host and on every device (Windows: C:\\Windows\\System32\\drivers\\etc\\hosts, as admin):`);
   console.log(`       ${hostsLine(meshIp, chatHost, rtcHost)}`);
@@ -353,6 +361,120 @@ async function cmdUpdate(flags) {
   must("docker", ["compose", "up", "-d", "--build", "--remove-orphans"], "docker compose up");
   console.log("\nRunning doctor...\n");
   return cmdDoctor(flags);
+}
+
+// ---------------------------------------------------------------------------
+// init (one-shot first run; reuses the cmd* functions above)
+
+/** Hidden helper for `init`: exit 0 if the admin can log in (= bootstrap already ran). Runs as a child so it gets the CA. */
+async function cmdProbeBootstrapped(flags) {
+  loadEnv(flags);
+  try {
+    const config = resolveConfig();
+    const client = createMatrixClient(config.homeserverUrl);
+    await Promise.race([
+      client.login(config.adminUser, config.adminPassword),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000)),
+    ]);
+    return 0;
+  } catch {
+    return 1;
+  }
+}
+
+/** Flags that `init` forwards to `setup`. */
+const SETUP_FLAGS = ["mesh-only", "mesh-ip", "chat-host", "rtc-host", "admin-user", "domain", "cloudflare-token", "email", "yes"];
+
+/**
+ * `squadz init`. `deps` lets tests swap docker (`run`), child node processes (`node`), setup / ca export,
+ * the env file and the log sink; production uses the real ones.
+ *   run(cmd, args, opts) -> {status, stdout, stderr}
+ *   node(args, {env, capture}) -> {status, stdout}   runs `node <args>` in the repo root
+ */
+export async function cmdInit(flags, deps = {}) {
+  const log = deps.log ?? console.log;
+  const runFn = deps.run ?? run;
+  const envFile = deps.envFile ?? resolveEnvFile(flags);
+  const nodeFn = deps.node ?? ((args, o = {}) => spawnSync(process.execPath, args, {
+    cwd: root, encoding: "utf8", env: o.env ?? process.env, stdio: o.capture ? ["inherit", "pipe", "inherit"] : "inherit",
+  }));
+  const setupFn = deps.setup ?? cmdSetup;
+  const caExportFn = deps.caExport ?? cmdCaExport;
+  const envExists = () => fs.existsSync(envFile);
+  if (envExists()) loadEnvFile(envFile);
+  const mesh = !!flags["mesh-only"] || (envExists() && isInternalTls(process.env));
+  const caFile = path.join(path.dirname(path.resolve(envFile)), CA_FILE);
+  const caReady = () => fs.existsSync(caFile) && fs.statSync(caFile).size > 0;
+  const self = path.join(root, "scripts", "squadz.mjs");
+  const envArgs = ["--env-file", envFile];
+  const childEnv = () => ({ ...process.env, ...(mesh && caReady() ? { NODE_EXTRA_CA_CERTS: caFile } : {}) });
+  const envPart = flags["env-file"] ? ` --env-file ${envFile}` : "";
+  const rerun = `node scripts/squadz.mjs init${mesh ? " --mesh-only" : ""}${envPart}`;
+  const check = (what, r) => { if (r.error || r.status !== 0) throw new Error(`${what} (${r.error?.message ?? `exit ${r.status}`})`); };
+  const composeRunning = (wanted) => {
+    const r = runFn("docker", ["compose", "ps", "--format", "json"]);
+    if (r.error || r.status !== 0) return false;
+    return checkContainers(parseComposePs(r.stdout), wanted).ok;
+  };
+  const setupFlags = { "no-next": true };
+  for (const k of SETUP_FLAGS) if (flags[k] !== undefined) setupFlags[k] = flags[k];
+  if (flags["env-file"]) setupFlags["env-file"] = flags["env-file"];
+  const setupCmd = `node scripts/squadz.mjs setup${mesh ? " --mesh-only" : ""}${envPart}`;
+  const bootCmd = `${mesh ? `NODE_EXTRA_CA_CERTS=${CA_FILE} ` : ""}node scripts/bootstrap.mjs --env-file ${flags["env-file"] ?? ".env"}`;
+  let invite = "";
+
+  const steps = [
+    { id: "setup", title: "Write .env (setup)", cmd: setupCmd, next: setupCmd,
+      done: () => envExists(),
+      run: async () => { await setupFn(setupFlags); loadEnvFile(envFile); } },
+  ];
+  if (mesh) {
+    steps.push(
+      { id: "caddy", title: "Start Caddy (builds on first run, ~2-4 min)", cmd: "docker compose up -d --build --no-deps caddy", next: "docker compose up -d --build --no-deps caddy",
+        done: () => envExists() && (caReady() || composeRunning(["caddy"])),
+        run: () => check("docker compose up caddy failed", runFn("docker", ["compose", "up", "-d", "--build", "--no-deps", "caddy"], { stdio: "inherit" })) },
+      { id: "ca", title: "Export Caddy's root CA", cmd: "node scripts/squadz.mjs ca export", next: "node scripts/squadz.mjs ca export",
+        done: () => caReady(),
+        run: () => { caExportFn({ out: caFile }, { run: runFn, log }); } },
+    );
+  }
+  steps.push(
+    { id: "up", title: "Start the full stack", cmd: "docker compose up -d --build", next: "docker compose up -d --build && docker compose logs --tail 50",
+      done: () => envExists() && composeRunning(),
+      run: () => check("docker compose up failed", runFn("docker", ["compose", "up", "-d", "--build"], { stdio: "inherit" })) },
+    { id: "bootstrap", title: "Bootstrap (Space, rooms, admin)", cmd: bootCmd, next: bootCmd,
+      done: () => envExists() && nodeFn([self, "_probe-bootstrapped", ...envArgs], { env: childEnv(), capture: true }).status === 0,
+      // Mesh: trust the exported CA for the bootstrap child so no manual NODE_EXTRA_CA_CERTS is needed.
+      run: () => check("bootstrap failed", nodeFn([path.join(root, "scripts", "bootstrap.mjs"), ...envArgs], { env: childEnv() })) },
+    { id: "restart", title: "Restart tuwunel (apply bootstrap)", cmd: "docker compose restart tuwunel", next: "docker compose restart tuwunel",
+      // Only needed when bootstrap actually ran in this invocation.
+      done: (ctx) => !ctx.ran.has("bootstrap"),
+      run: () => check("docker compose restart tuwunel failed", runFn("docker", ["compose", "restart", "tuwunel"], { stdio: "inherit" })) },
+    { id: "doctor", title: "Doctor", cmd: "node scripts/squadz.mjs doctor", next: "node scripts/squadz.mjs doctor",
+      run: () => check("doctor reported failures", nodeFn([self, "doctor", ...envArgs], { env: childEnv() })) },
+    { id: "invite", title: "First invite", cmd: "node scripts/squadz.mjs invite", next: "node scripts/squadz.mjs invite",
+      run: () => {
+        const r = nodeFn([self, "invite", ...envArgs], { env: childEnv(), capture: true });
+        check("invite failed", r);
+        invite = String(r.stdout).replace(/^[\s\S]*?----- copy from here -----\s*/, "").replace(/\s*----- to here -----[\s\S]*$/, "");
+      } },
+  );
+
+  const dryRun = !!flags["dry-run"];
+  if (dryRun) log(`squadz init --dry-run: ${mesh ? "mesh-only (internal TLS)" : "ACME (real domain)"} plan, nothing will be run.\n`);
+  try {
+    await runInit({ steps, dryRun, log });
+  } catch (err) {
+    if (!(err instanceof InitError)) throw err;
+    log(`\n${formatInitFailure(err, rerun)}`);
+    return 1;
+  }
+  if (dryRun) { log("\n--dry-run: nothing was run."); return 0; }
+  loadEnvFile(envFile);
+  log(buildOnboardingSummary({
+    env: process.env, invite, caFile: path.basename(caFile), caInstructions: caTrustInstructions(path.basename(caFile)),
+  }));
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -638,11 +760,14 @@ export function caReexecEnv(env, caFile, exists = (f) => fs.existsSync(f) && fs.
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { flags, pos } = parseArgs(rest);
-  if (cmd && !["setup", "ca", "update"].includes(cmd) && !flags.help) {
+  // `update` re-execs too: cmdUpdate runs cmdDoctor, whose fetches need the CA. Only `setup` (no .env
+  // yet) and `ca` (exports the CA itself) are excluded.
+  if (cmd && !["setup", "ca"].includes(cmd) && !flags.help) {
     const envFile = resolveEnvFile(flags);
     if (fs.existsSync(envFile)) {
       loadEnvFile(envFile);
-      const reenv = caReexecEnv(process.env, path.join(root, CA_FILE));
+      // The CA lives next to the .env (where setupMesh writes it), not necessarily in the repo root.
+      const reenv = caReexecEnv(process.env, path.join(path.dirname(path.resolve(envFile)), CA_FILE));
       if (reenv) {
         const r = spawnSync(process.execPath, process.argv.slice(1), { stdio: "inherit", env: reenv });
         process.exit(r.status ?? 1);
@@ -663,6 +788,8 @@ async function main() {
     case "restore": return cmdRestore(flags, pos);
     case "service": return cmdService(flags, pos);
     case "update": return process.exit(await cmdUpdate(flags));
+    case "init": return process.exit(await cmdInit(flags));
+    case "_probe-bootstrapped": return process.exit(await cmdProbeBootstrapped(flags));
     default: throw new Error(`unknown command "${cmd}"\n\n${USAGE}`);
   }
 }
