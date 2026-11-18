@@ -21,6 +21,26 @@ RUN wget -q -O /tmp/cinny.tar.gz \
  && tar -xzf /tmp/cinny.tar.gz -C /srv/cinny --strip-components=1 \
  && test -f /srv/cinny/index.html
 
+# Squadz branding (Block E2): title, favicon, manifest, theme CSS, first-run dark default.
+# Every edit is followed by a grep so a Cinny bump that moves a pattern fails the build loudly.
+COPY brand/squadz.css brand/squadz-init.js brand/manifest.json /srv/cinny/
+COPY brand/icon.svg brand/icon-16.png brand/icon-32.png brand/icon-180.png brand/icon-192.png brand/icon-512.png /srv/cinny/squadz/
+RUN cd /srv/cinny \
+ && sed -i \
+    -e 's|<title>Cinny</title>|<title>Squadz</title>|' \
+    -e 's|content="Cinny"|content="Squadz"|g' \
+    -e 's|content="#000000"|content="#0E0F22"|' \
+    -e 's|<link id="favicon" rel="shortcut icon" href="[^"]*" />|<link id="favicon" rel="icon" type="image/png" sizes="32x32" href="/squadz/icon-32.png" /><link rel="icon" type="image/svg+xml" href="/squadz/icon.svg" />|' \
+    -e 's|href="/assets/apple-touch-icon-[^"]*"|href="/squadz/icon-180.png"|g' \
+    -e 's|</head>|<script src="/squadz-init.js"></script><link rel="stylesheet" href="/squadz.css" /></head>|' \
+    index.html \
+ && grep -q '<title>Squadz</title>' index.html \
+ && grep -q 'href="/squadz.css"' index.html \
+ && grep -q 'src="/squadz-init.js"' index.html \
+ && grep -q 'href="/squadz/icon-32.png"' index.html \
+ && grep -q 'content="#0E0F22"' index.html \
+ && ! grep -q '<title>Cinny' index.html
+
 FROM caddy:2.9.1-alpine AS final
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY --from=cinny /srv/cinny /srv/cinny

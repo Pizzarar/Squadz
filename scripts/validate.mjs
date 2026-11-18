@@ -483,6 +483,13 @@ check('Hosted web client: pinned Cinny + sha256, rendered config, Caddy catch-al
   assert(df.includes('sha256sum -c'), 'Dockerfile must verify the Cinny tarball with sha256sum -c');
   assert(df.includes('ENTRYPOINT') && df.includes('squadz-entrypoint.sh'), 'Dockerfile must install the config-rendering entrypoint');
 
+  // E2 branding: every file the Dockerfile COPYs from caddy/brand must exist; sed edits are grep-verified.
+  for (const f of ['squadz.css', 'squadz-init.js', 'manifest.json', 'icon.svg', 'icon-32.png', 'icon-180.png', 'icon-192.png', 'icon-512.png']) {
+    assert(df.includes(f), `Dockerfile must COPY brand/${f}`);
+    assert(fs.existsSync(path.join(ROOT, 'caddy', 'brand', f)), `Missing caddy/brand/${f}`);
+  }
+  assert(df.includes('href="/squadz.css"') && df.includes('<title>Squadz</title>'), 'Dockerfile must inject the Squadz title + stylesheet');
+
   const tpl = JSON.parse(readFileRel('config/web-client/config.json.template').replace(/__CHAT_FQDN__/g, 'chat.example.test'));
   assert(JSON.stringify(tpl.homeserverList) === '["chat.example.test"]', 'config template homeserverList must be exactly [CHAT_FQDN]');
   assert(tpl.defaultHomeserver === 0, 'config template defaultHomeserver must be 0');

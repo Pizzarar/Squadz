@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Squadz">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1B1D3F"/>
+      <stop offset="1" stop-color="#0B0C19"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.58" r="0.5">
+      <stop offset="0" stop-color="#2EE6A6" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#2EE6A6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <rect width="128" height="128" rx="30" fill="url(#glow)"/>
+  <!-- three friends: a squad of three, overlapping -->
+  <circle cx="45" cy="50" r="22" fill="#7C5CFF"/>
+  <circle cx="83" cy="50" r="22" fill="#F2F3FF" fill-opacity="0.96"/>
+  <circle cx="64" cy="84" r="22" fill="#2EE6A6"/>
+</svg>

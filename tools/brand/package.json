@@ -1,0 +1,10 @@
+{
+  "name": "squadz-brand-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Rasterizes assets/brand/*.svg to PNG (dev-time only; PNG outputs are committed)",
+  "engines": { "node": ">=20" },
+  "scripts": { "build": "node export-png.mjs" },
+  "devDependencies": { "@resvg/resvg-js": "2.6.2" }
+}

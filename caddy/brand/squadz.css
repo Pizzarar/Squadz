@@ -1,0 +1,48 @@
+/* Squadz look for Cinny 4.12.8 (pinned). Palette: base #0E0F22, accent mint #2EE6A6, glow violet #7C5CFF.
+   Cinny's dark theme is a vanilla-extract class that defines the Folds colour contract as hashed
+   custom properties (--oq6d07N, N in base36 order: Background, Surface, SurfaceVariant, Primary, ...).
+   We override only Background/Surface/SurfaceVariant/Primary under .dark-theme.dark-theme (higher
+   specificity than Cinny's own rule, so source order does not matter). Other themes stay stock.
+   Contrast (WCAG): text #F2F3FF on #0E0F22 = 17.2:1; mint #2EE6A6 on #0E0F22 = 11.7:1;
+   Primary.OnMain #04241A on mint = 10.2:1. Implemented via the theme-variable approach of Cinny
+   (cinnyapp/cinny). */
+.dark-theme.dark-theme {
+  --oq6d070: #0E0F22;
+  --oq6d071: #15172F;
+  --oq6d072: #1C1F3B;
+  --oq6d073: #2A2E55;
+  --oq6d074: #F2F3FF;
+  --oq6d075: #15172F;
+  --oq6d076: #1C1F3B;
+  --oq6d077: #252849;
+  --oq6d078: #303560;
+  --oq6d079: #F2F3FF;
+  --oq6d07a: #1C1F3B;
+  --oq6d07b: #252849;
+  --oq6d07c: #2E325A;
+  --oq6d07d: #3A3F6F;
+  --oq6d07e: #F2F3FF;
+  --oq6d07f: #2EE6A6;
+  --oq6d07g: #4AEAB3;
+  --oq6d07h: #25D197;
+  --oq6d07i: #1FBF89;
+  --oq6d07j: #04241A;
+  --oq6d07k: #0F4A3A;
+  --oq6d07l: #135744;
+  --oq6d07m: #17644E;
+  --oq6d07n: #1B7158;
+  --oq6d07o: #D4FBEC;
+  --tc-link: #5EF0BE;
+}
+
+/* The one surreal touch: a faint mint/violet glow behind the app. */
+body.dark-theme,
+body:has(.dark-theme) {
+  background-image:
+    radial-gradient(60rem 40rem at 10% -10%, rgba(124, 92, 255, 0.10), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 110%, rgba(46, 230, 166, 0.07), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection { background: rgba(46, 230, 166, 0.35); }
+:focus-visible { outline-color: #2EE6A6; }
