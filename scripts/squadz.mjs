@@ -73,7 +73,11 @@ export function parseArgs(argv) {
     if (a === "-h") flags.help = true;
     else if (a.startsWith("--")) {
       const [k, inline] = a.slice(2).split(/=(.*)/s);
-      if (valued.has(k)) {
+      if (k === "topic") {
+        const v = inline ?? argv[++i];
+        if (v === undefined) throw new Error("--topic requires a value");
+        (flags.topic ??= []).push(v);
+      } else if (valued.has(k)) {
         flags[k] = inline ?? argv[++i];
         if (flags[k] === undefined) throw new Error(`--${k} requires a value`);
       } else flags[k] = true;
