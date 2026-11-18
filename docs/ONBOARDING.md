@@ -94,8 +94,9 @@ In any room:
 
 > Custom emoji are Matrix "image packs" (MSC2545). Support varies by client and
 > version:
-> - **Element desktop (Element Web)** shows the pack in the emoji picker and
->   renders the emotes inline.
+> - **The Squadz web client (Cinny, at `https://CHAT_FQDN/`)** shows the pack in
+>   the emoji picker and renders the emotes inline. Element Web/Desktop has no
+>   MSC2545 support (see docs/CLIENTS.md).
 > - **Element X** can send and display custom emoji from packs, but the feature
 >   is newer there and some builds only surface packs set directly in the room —
 >   which is why Squadz sets the pack in every text room, not just the Space.

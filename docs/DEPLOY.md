@@ -50,7 +50,7 @@ Non-interactive: `node scripts/squadz.mjs setup --domain example.com --cloudflar
 ## 4. Start the stack
 
 ```bash
-node scripts/validate.mjs        # static checks, expect 9/9
+node scripts/validate.mjs        # static checks, expect all checks to pass
 docker compose up -d --build     # first build compiles Caddy with the Cloudflare plugin
 docker compose logs -f caddy     # wait for "certificate obtained successfully" x2, then Ctrl-C
 ```
