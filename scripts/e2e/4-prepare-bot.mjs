@@ -35,7 +35,7 @@ run(async () => {
       try {
         await admin.invite(roomId, bot.userId);
       } catch (err) {
-        if (!/already/i.test(err.message)) throw err;
+        if (!/already|cannot invite user that is joined/i.test(err.message)) throw err;
       }
     }
   });
