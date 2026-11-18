@@ -16,3 +16,6 @@ Thumbs.db
 
 # Runtime data volumes (if mounted locally)
 data/
+
+# CI e2e scratch (CA bundle, state)
+.e2e/

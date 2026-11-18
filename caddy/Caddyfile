@@ -10,8 +10,15 @@
 	}
 }
 
+# Test-only (CI e2e): docker-compose.ci.yml sets SQUADZ_TLS=internal_tls so Caddy issues
+# certs from its own internal CA instead of ACME DNS-01. Unset in production, where the
+# `import {$SQUADZ_TLS:dns_tls}` lines below resolve to `import dns_tls` (unchanged behaviour).
+(internal_tls) {
+	tls internal
+}
+
 https://{$CHAT_FQDN} {
-	import dns_tls
+	import {$SQUADZ_TLS:dns_tls}
 
 	# Matrix client discovery + MatrixRTC LiveKit focus (MSC4143)
 	handle /.well-known/matrix/client {
@@ -44,7 +51,7 @@ https://{$CHAT_FQDN} {
 }
 
 https://{$RTC_FQDN} {
-	import dns_tls
+	import {$SQUADZ_TLS:dns_tls}
 
 	# CORS preflight for MatrixRTC clients (Element Call, Element X, Go-live)
 	@cors_preflight method OPTIONS

@@ -418,6 +418,31 @@ check('Tuwunel, LiveKit, lk-jwt-service, and soundboard configs match contract',
   return 'tuwunel, livekit, lk-jwt-service, soundboard configs verified';
 });
 
+// 8. CI e2e overlay (P2 block C1): internal-TLS switch must not change production behaviour
+check('CI e2e overlay: Caddyfile TLS switch defaults to DNS-01, overlay + workflow wired', () => {
+  const caddyfile = readFileRel('caddy/Caddyfile');
+  const imports = caddyfile.match(/^\s*import \{\$SQUADZ_TLS:dns_tls\}\s*$/gm) || [];
+  assert(imports.length === 2, `both site blocks must use "import {$SQUADZ_TLS:dns_tls}" (found ${imports.length})`);
+  assert(!/^\s*import dns_tls\s*$/m.test(caddyfile), 'no site block may import dns_tls directly (use the SQUADZ_TLS switch)');
+  assert(/\(internal_tls\) \{\s*tls internal\s*\}/.test(caddyfile), 'Caddyfile missing (internal_tls) { tls internal } snippet');
+
+  const overlay = readFileRel('docker-compose.ci.yml');
+  assert(/SQUADZ_TLS:\s*"internal_tls"/.test(overlay), 'docker-compose.ci.yml must set caddy SQUADZ_TLS=internal_tls');
+  const base = readFileRel('docker-compose.yml');
+  assert(!base.includes('SQUADZ_TLS'), 'production docker-compose.yml must not set SQUADZ_TLS');
+  const envExample = readFileRel('.env.example');
+  const envVars = new Set([...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]));
+  for (const m of overlay.replace(/^\s*#.*$/gm, '').matchAll(/\$\{([A-Z0-9_]+)/g)) {
+    assert(envVars.has(m[1]), `docker-compose.ci.yml references \${${m[1]}} missing from .env.example`);
+  }
+
+  const wf = readFileRel('.github/workflows/e2e.yml');
+  assert(wf.includes('docker-compose.ci.yml'), 'e2e workflow must use docker-compose.ci.yml');
+  assert([...wf.matchAll(/runs-on:\s*(\S+)/g)].every((m) => m[1] === 'ubuntu-latest'),'e2e workflow must run on GitHub-hosted ubuntu-latest only');
+  assert(readFileRel('.gitignore').includes('.e2e/'), '.e2e/ must be gitignored');
+  return 'Caddy switch + overlay + workflow verified';
+});
+
 // Print summary report
 console.log('Squadz Static Validation (scripts/validate.mjs)');
 console.log('===============================================');

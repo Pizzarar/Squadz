@@ -1,0 +1,13 @@
+{
+  "name": "squadz-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-stack e2e phases (run by .github/workflows/e2e.yml). Node 22+, built-in fetch/WebSocket only.",
+  "scripts": {
+    "test": "node --test test/lib.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
