@@ -6,6 +6,7 @@
 
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { checkPushGateway } from "./push.mjs";
 
 import { SPACE, ROOMS } from "./seed.mjs";
 import { toUserId } from "./config.mjs";
@@ -212,6 +213,7 @@ export async function runDoctor(env, io, now = new Date()) {
   results.push(checkContainers(await safe(async () => parseComposePs(await io.composePs()), [])));
   if (io.serviceState) results.push(checkServiceEnabled(await safe(() => io.serviceState(), null)));
   if (io.backupFiles) results.push(checkBackupFreshness(await safe(() => io.backupFiles(), []), now));
+  if (io.pushProbe) results.push(checkPushGateway(await safe(() => io.pushProbe(), null)));
   return results;
 }
 

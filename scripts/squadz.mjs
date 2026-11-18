@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnvFile, resolveConfig } from "./lib/config.mjs";
 import { createMatrixClient } from "./lib/matrix.mjs";
 import { parseTopicArg, setServer, showServer } from "./lib/server.mjs";
+import { probePushGateway } from "./lib/push.mjs";
 import { addEmoji, listEmoji, removeEmoji } from "./lib/emoji.mjs";
 import {
   COPY_ONCE, buildEnvValues, buildInviteMessage, generateSecrets, listUsers, obtainToken,
@@ -223,6 +224,7 @@ function realIo(env) {
       if (!fs.existsSync(dir)) return [];
       return fs.readdirSync(dir).map((name) => ({ name, mtimeMs: fs.statSync(path.join(dir, name)).mtimeMs }));
     },
+    pushProbe: () => probePushGateway(run, async (u) => (await fetch(u, { signal: AbortSignal.timeout(8000) })).status),
     composePs: () => {
       const r = run("docker", ["compose", "ps", "--format", "json"]);
       if (r.error || r.status !== 0) throw new Error(r.error?.message ?? r.stderr);

@@ -147,6 +147,17 @@ Once the stack is up, `node scripts/squadz.mjs doctor` checks DNS, ports, TLS, d
    docker compose --profile bots up -d soundboard
    ```
 
+### 4.4 Phone Notifications (push)
+
+Element X on iOS/Android registers an HTTP pusher with Element's public push gateway, `https://matrix.org/_matrix/push/v1/notify` (Sygnal; FCM on Android, APNs on iOS). When a message should notify someone, **Tuwunel POSTs an `event_id_only` notification to that gateway over the internet**, and the gateway wakes the phone through Google/Apple. The payload contains only the room and event ids, never message text.
+
+What this needs from the host:
+- **Outbound HTTPS (443) to `matrix.org`** from the `tuwunel` container. Nothing inbound: the push gateway never connects back to you, and the host stays reachable only over the mesh.
+- **Nothing in `config/tuwunel.toml`.** Verified against Tuwunel v1.5.1 (`src/service/pusher/{send,request}.rs`): pushes use a dedicated HTTP client and are *not* gated by `allow_federation` (kept `false`). `ip_range_denylist` (default: RFC1918, loopback, CGNAT 100.64/10, ...) only rejects pusher URLs whose literal IP or resolved peer is in a private range; matrix.org is public, so the default is fine. Do not set `ip_range_denylist = []` or `push_everything`; `scripts/validate.mjs` fails if they appear.
+- **Encrypted rooms still notify.** The push body has no content, so encryption does not matter to the gateway: the phone receives "event X in room Y", then the app fetches and decrypts the event from your homeserver. On **Android** that fetch happens in the background app process. On **iOS** the Notification Service Extension does it, and it must reach `https://CHAT_FQDN`, which resolves to the mesh IP: **it only works while Tailscale (the mesh) is connected on that phone.** With the VPN off, iOS shows a generic "Notification" with no text (and Android a generic one after the fetch fails).
+
+Check it: `node scripts/squadz.mjs doctor` runs "push gateway reachable" (HTTP request to the gateway from inside the tuwunel container, or from the host with a note if the image has no curl/wget). CI proves the whole path with a mock gateway (`scripts/e2e/2d-push.mjs`). The first real notification on a phone is the only on-device test left (docs/ONBOARDING.md, "Phone notifications").
+
 ---
 
 ## 5. Troubleshooting
