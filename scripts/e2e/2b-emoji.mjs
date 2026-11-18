@@ -23,7 +23,7 @@ run(async () => {
     const pack = await read();
     const img = pack.images.e2e_dot;
     assert(img && String(img.url).startsWith("mxc://"), "e2e_dot has an mxc url");
-    assertEq(img.info, { w: 1, h: 1, size: PNG.length, mimetype: "image/png" }, "info block");
+    assertEq([img.info.w, img.info.h, img.info.size, img.info.mimetype], [1, 1, PNG.length, "image/png"], "info block");
     assertEq(img.usage, ["emoticon"], "emoticon usage");
     assertEq(["gg", "party", "squadz", "wave"].every((k) => k in pack.images), true, "seeded images kept");
   });
