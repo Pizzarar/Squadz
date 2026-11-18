@@ -1,5 +1,6 @@
 // Phase 2: run the real scripts/bootstrap.mjs against the live Tuwunel (through Caddy TLS), twice.
 import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,10 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bootstrap = path.resolve(here, "..", "bootstrap.mjs");
+// Seed art (P4 E3): assets/emoji = emoticons, assets/stickers = stickers, assets/avatars = Space + rooms.
+const pngs = (d) => readdirSync(path.resolve(here, "..", "..", "assets", d)).filter((f) => f.endsWith(".png")).map((f) => f.slice(0, -4)).sort();
+const EMOJI = pngs("emoji");
+const STICKERS = pngs("stickers");
 
 function runBootstrap(label) {
   const r = spawnSync(process.execPath, [bootstrap], { env: process.env, encoding: "utf8" });
@@ -35,7 +40,8 @@ run(async () => {
     assert(s.spaceId?.startsWith("!"), "space id returned");
     assertEq(s.createdRooms, ROOMS.length, "createdRooms");
     assertEq(Object.keys(s.roomIds).sort(), ROOMS.map((r) => r.slug).sort(), "room slugs");
-    assertEq(s.emoji.uploaded, 4, "emoji uploaded (assets/emoji/*.png)");
+    assertEq(s.emoji.uploaded, EMOJI.length + STICKERS.length, "emoji + stickers uploaded");
+    assertEq(s.avatars, { uploaded: 7, set: 7 }, "Space icon + 6 room avatars");
     return s;
   });
 
@@ -76,8 +82,18 @@ run(async () => {
     for (const roomId of targets) {
       const pack = await client.getState(roomId, "im.ponies.room_emotes", "");
       assert(pack && pack.images, `emote pack present in ${roomId}`);
-      assertEq(Object.keys(pack.images).sort(), ["gg", "party", "squadz", "wave"], `emote shortcodes in ${roomId}`);
+      assertEq(Object.keys(pack.images).sort(), [...EMOJI, ...STICKERS].sort(), `emote shortcodes in ${roomId}`);
       for (const img of Object.values(pack.images)) assert(String(img.url).startsWith("mxc://"), "emote url is mxc://");
+      for (const code of STICKERS) assertEq(pack.images[code].usage, ["sticker"], `:${code}: is a sticker`);
+    }
+  });
+
+  await step("seed art: Space icon + every room avatar is a real upload", async () => {
+    const { client } = await loggedInClient(cfg, cfg.adminUser, cfg.adminPassword);
+    for (const [slug, roomId] of [[SPACE.slug, first.spaceId], ...Object.entries(first.roomIds)]) {
+      const av = await client.getState(roomId, "m.room.avatar", "");
+      assert(String(av?.url).startsWith("mxc://"), `#${slug} avatar is mxc://`);
+      assertEq(av.info?.mimetype, "image/png", `#${slug} avatar mimetype`);
     }
   });
 
@@ -99,6 +115,7 @@ run(async () => {
     assertEq(second.createdRooms, 0, "createdRooms on re-run");
     assertEq(second.spaceLinksChanged, 0, "spaceLinksChanged on re-run");
     assertEq(second.emoji, { uploaded: 0, set: 0 }, "emoji on re-run");
+    assertEq(second.avatars, { uploaded: 0, set: 0 }, "avatars on re-run");
     assertEq(second.invited, 0, "invited on re-run");
     assertEq(second.admin.registered, false, "admin already exists on re-run");
   });

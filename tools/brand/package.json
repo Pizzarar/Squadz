@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Rasterizes assets/brand/*.svg to PNG (dev-time only; PNG outputs are committed)",
+  "description": "Rasterizes assets/brand/*.svg and the seed art (assets/art-src) to PNG (dev-time only; PNG outputs are committed)",
   "engines": { "node": ">=20" },
-  "scripts": { "build": "node export-png.mjs" },
+  "scripts": { "build": "node export-png.mjs", "seed-art": "node seed-art.mjs" },
   "devDependencies": { "@resvg/resvg-js": "2.6.2" }
 }

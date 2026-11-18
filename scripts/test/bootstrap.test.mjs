@@ -8,16 +8,22 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createMockHomeserver } from "./mock-homeserver.mjs";
 import { createMatrixClient } from "../lib/matrix.mjs";
-import { seed } from "../lib/seed.mjs";
+import { mayWrite, seed, SEED_ART_STATE_TYPE } from "../lib/seed.mjs";
 import { toUserId, toLocalpart, resolveConfig } from "../lib/config.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const emojiDir = path.resolve(here, "..", "..", "assets", "emoji");
+const assetsDir = path.resolve(here, "..", "..", "assets");
+const emojiDir = path.join(assetsDir, "emoji");
+const pngs = (dir) => readdirSync(path.join(assetsDir, dir)).filter((f) => f.endsWith(".png")).map((f) => f.slice(0, -4)).sort();
+const EMOJI = pngs("emoji");
+const STICKERS = pngs("stickers");
+const AVATARS = pngs("avatars");
 
 const SERVER_NAME = "chat.squadz.test";
 const REG_TOKEN = "test-token";
@@ -65,7 +71,9 @@ test("first run creates everything", async () => {
 
   assert.equal(summary.admin.registered, true, "admin should be registered on first run");
   assert.equal(summary.createdRooms, 6, "six child rooms should be created");
-  assert.equal(summary.emoji.uploaded, 4, "four emoji PNGs should be uploaded");
+  assert.ok(EMOJI.length >= 12 && STICKERS.length >= 4, "seed art ships a real emoji + sticker pack");
+  assert.equal(summary.emoji.uploaded, EMOJI.length + STICKERS.length, "every emoji + sticker PNG uploaded");
+  assert.deepEqual(summary.avatars, { uploaded: 7, set: 7 }, "Space icon + six room avatars");
   assert.equal(summary.emoji.set, 5, "emoji pack set on the Space + four text rooms");
   assert.equal(summary.invited, 1, "friend invited to the Space only (rooms are restricted)");
 
@@ -75,7 +83,7 @@ test("first run creates everything", async () => {
   assert.equal(mock.state.counts.createRoom, 7, "space + six rooms");
   assert.ok(mock.state.counts.register >= 1, "a registration happened");
   assert.ok(mock.state.counts.login >= 1, "an initial login attempt happened");
-  assert.equal(mock.state.counts.upload, 4);
+  assert.equal(mock.state.counts.upload, EMOJI.length + STICKERS.length + AVATARS.length);
 });
 
 // Mutation counters that a second run must NOT touch. `login` is deliberately
@@ -93,6 +101,7 @@ test("second run creates nothing", async () => {
   assert.equal(summary.createdRooms, 0, "no rooms created on second run");
   assert.equal(summary.emoji.uploaded, 0, "no media uploaded on second run");
   assert.equal(summary.emoji.set, 0, "emoji pack left untouched");
+  assert.deepEqual(summary.avatars, { uploaded: 0, set: 0 }, "avatars left untouched");
   assert.equal(summary.invited, 0, "friend already invited, nothing to do");
 
   for (const key of MUTATIONS) {
@@ -187,13 +196,14 @@ test("emoji pack uses MSC2545 image-pack format on the Space and text rooms", as
     assert.deepEqual(pack.pack?.usage, ["emoticon"], `${slug} pack usage is emoticon`);
     assert.ok(pack.images, `${slug} pack has an images map`);
     const shortcodes = Object.keys(pack.images);
-    assert.deepEqual(shortcodes.sort(), ["gg", "party", "squadz", "wave"]);
+    assert.deepEqual(shortcodes.sort(), [...EMOJI, ...STICKERS].sort());
     for (const code of shortcodes) {
       const image = pack.images[code];
       assert.ok(image.url.startsWith("mxc://"), `${code} has an mxc url`);
       assert.equal(image.body, code, `${code} body is the shortcode`);
       assert.equal(image.info.mimetype, "image/png");
-      assert.equal(image.usage, undefined, `${code} has no per-image usage (usage is on the pack)`);
+      assert.deepEqual(image.usage, [STICKERS.includes(code) ? "sticker" : "emoticon"], `${code} usage`);
+      assert.ok(image.info.size < 30 * 1024 && image.info.w > 0, `${code} is small with dimensions`);
     }
   }
 });
@@ -264,4 +274,64 @@ test("resolveConfig derives server name, admin MXID and homeserver URL", () => {
   assert.equal(cfg.adminUserId, "@admin:chat.example");
   assert.equal(cfg.homeserverUrl, "https://chat.example");
   assert.equal(cfg.registrationToken, "tok");
+});
+
+// ---------------------------------------------------------------------------
+// Seed art (P4 E3): avatars and safe upgrades. These run after the first-run tests above.
+// ---------------------------------------------------------------------------
+
+test("Space icon (via server set) and every room avatar are seeded", () => {
+  const space = roomBySlug("squadz");
+  for (const slug of ["squadz", "general", "games", "clips", "memes", "lounge", "game-night"]) {
+    const av = stateOf(roomBySlug(slug), "m.room.avatar", "");
+    assert.ok(av?.url?.startsWith("mxc://"), `${slug} has an avatar`);
+    assert.equal(av.info.mimetype, "image/png");
+    assert.ok(av.info.size < 30 * 1024, `${slug} avatar under 30KB`);
+  }
+  // The Space icon went through D3 setServer, which records its upload cache.
+  assert.equal(stateOf(space, "dev.squadz.icon", "").url, stateOf(space, "m.room.avatar", "").url);
+  const art = stateOf(space, SEED_ART_STATE_TYPE, "");
+  assert.equal(Object.keys(art.avatars).length, 7);
+  assert.equal(Object.keys(art.images).length, EMOJI.length + STICKERS.length);
+});
+
+test("seed art never clobbers what the host changed, but upgrades its own art", async () => {
+  const space = roomBySlug("squadz");
+  const general = roomBySlug("general");
+  const client = createMatrixClient(baseUrl);
+  const pack = () => stateOf(space, "im.ponies.room_emotes", "");
+
+  // Host replaced :gg:, removed :wave: and set their own #general avatar.
+  const p = structuredClone(pack());
+  p.images.gg = { ...p.images.gg, url: "mxc://host/gg" };
+  delete p.images.wave;
+  space.state.set("im.ponies.room_emotes\u0000", p);
+  general.state.set("m.room.avatar\u0000", { url: "mxc://host/general" });
+  // Our own :hype: art "changed" since the last bootstrap (stale hash in the record).
+  const art = structuredClone(stateOf(space, SEED_ART_STATE_TYPE, ""));
+  art.images.hype.sha256 = "stale";
+  space.state.set(`${SEED_ART_STATE_TYPE}\u0000`, art);
+
+  const summary = await seed(client, makeConfig());
+  assert.deepEqual(summary.emoji.uploaded, 1, "only :hype: re-uploaded");
+  assert.equal(pack().images.gg.url, "mxc://host/gg", "host's :gg: kept");
+  assert.equal(pack().images.wave, undefined, "host-removed :wave: not re-added");
+  assert.notEqual(pack().images.hype.url, art.images.hype.url, ":hype: upgraded");
+  assert.equal(stateOf(roomBySlug("memes"), "im.ponies.room_emotes", "").images.hype.url, pack().images.hype.url, "upgrade reaches text rooms");
+  assert.equal(stateOf(general, "m.room.avatar", "").url, "mxc://host/general", "host avatar kept");
+  assert.deepEqual(summary.avatars, { uploaded: 0, set: 0 });
+
+  const again = await seed(client, makeConfig());
+  assert.deepEqual([again.emoji, again.avatars], [{ uploaded: 0, set: 0 }, { uploaded: 0, set: 0 }], "stable afterwards");
+});
+
+test("mayWrite: empty, ours-changed and legacy placeholders are writable; host art is not", () => {
+  const mine = { url: "mxc://s/a", sha256: "h1" };
+  assert.equal(mayWrite(null, undefined, "h1"), true, "never seeded, empty");
+  assert.equal(mayWrite(null, mine, "h2"), false, "host removed ours");
+  assert.equal(mayWrite("mxc://s/a", mine, "h1"), false, "ours, unchanged");
+  assert.equal(mayWrite("mxc://s/a", mine, "h2"), true, "ours, art changed");
+  assert.equal(mayWrite("mxc://host/x", mine, "h2"), false, "host replaced ours");
+  assert.equal(mayWrite("mxc://old/gg", undefined, "h1", true), true, "pre-E3 placeholder");
+  assert.equal(mayWrite("mxc://host/x", undefined, "h1"), false, "host image, no record");
 });
