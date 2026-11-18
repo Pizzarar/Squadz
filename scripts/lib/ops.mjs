@@ -101,6 +101,113 @@ export function buildEnvValues({ domain, cloudflareToken, meshIp, email, adminUs
   };
 }
 
+// ---------------------------------------------------------------------------
+// mesh-only mode (no domain, no Cloudflare): SQUADZ_TLS=internal, hosts-file DNS
+// ---------------------------------------------------------------------------
+
+export const MESH_DEFAULT_CHAT = "chat.squadz.mesh";
+export const MESH_DEFAULT_RTC = "rtc.squadz.mesh";
+export const MESH_DOMAIN = "squadz.mesh";
+export const CA_FILE = "squadz-ca.crt";
+export const CADDY_ROOT_CA_PATH = "/data/caddy/pki/authorities/local/root.crt";
+
+/** True when .env asks Caddy for its own internal CA (mesh-only / CI) instead of ACME DNS-01. */
+export function isInternalTls(env) {
+  return ["internal", "internal_tls"].includes(String(env?.SQUADZ_TLS ?? "").trim());
+}
+
+/**
+ * This device's IP from `nordvpn meshnet peer list`. The output starts with a
+ * "Local Peer:" block, so prefer an IP inside it over the remote peers' IPs.
+ */
+export function parseNordLocalIp(text) {
+  const t = String(text);
+  const local = t.match(/Local Peer:([\s\S]*?)(?:\n\s*\n|\nRemote Peers?:|$)/i);
+  return (local && parseMeshIp(local[1])) || parseMeshIp(t);
+}
+
+/** Validate `setup --mesh-only` inputs. Returns problems (empty = OK). */
+export function validateMeshInputs({ meshIp, chatHost, rtcHost }) {
+  const problems = [];
+  if (!meshIp || !isMeshIp(meshIp)) problems.push(`mesh IP "${meshIp ?? ""}" is not a 100.64.0.0/10 address`);
+  for (const [flag, h] of [["--chat-host", chatHost], ["--rtc-host", rtcHost]]) {
+    if (!h || !isFqdn(h)) problems.push(`${flag} "${h ?? ""}" is not a valid hostname (e.g. ${MESH_DEFAULT_CHAT})`);
+  }
+  if (chatHost && rtcHost && chatHost.toLowerCase() === rtcHost.toLowerCase()) {
+    problems.push("--chat-host and --rtc-host must differ (Caddy serves them as two sites)");
+  }
+  return problems;
+}
+
+/** .env key/values for mesh-only mode: no Cloudflare token, SQUADZ_TLS=internal. */
+export function buildMeshEnvValues({ meshIp, chatHost = MESH_DEFAULT_CHAT, rtcHost = MESH_DEFAULT_RTC, adminUser, secrets }) {
+  const domain = chatHost.split(".").slice(1).join(".") || MESH_DOMAIN;
+  return {
+    SQUADZ_DOMAIN: domain,
+    CHAT_FQDN: chatHost,
+    RTC_FQDN: rtcHost,
+    MESH_IP: meshIp,
+    ACME_EMAIL: `admin@${domain}`,
+    CLOUDFLARE_API_TOKEN: "",
+    SQUADZ_TLS: "internal",
+    COMPOSE_FILE: "docker-compose.yml:docker-compose.mesh.yml",
+    SQUADZ_ADMIN_USER: adminUser || "admin",
+    ...secrets,
+  };
+}
+
+/** The hosts-file line every device needs in mesh-only mode. */
+export function hostsLine(meshIp, chatHost, rtcHost) {
+  return `${meshIp} ${chatHost} ${rtcHost}`;
+}
+
+/**
+ * Validate a parsed .env (Map or object) for the active TLS mode. The
+ * Cloudflare token is only required for the real-domain mode.
+ */
+export function validateEnvForMode(env) {
+  const get = (k) => (env instanceof Map ? env.get(k) : env[k]) ?? "";
+  const problems = [];
+  const tlsMode = String(get("SQUADZ_TLS")).trim();
+  const mesh = isInternalTls({ SQUADZ_TLS: tlsMode });
+  const req = ["CHAT_FQDN", "RTC_FQDN", "MESH_IP", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TUWUNEL_REGISTRATION_TOKEN"];
+  if (!mesh) req.push("CLOUDFLARE_API_TOKEN", "ACME_EMAIL", "SQUADZ_DOMAIN");
+  for (const k of req) if (!String(get(k)).trim()) problems.push(`${k} is empty`);
+  if (get("MESH_IP") && !isMeshIp(get("MESH_IP"))) problems.push(`MESH_IP "${get("MESH_IP")}" is not a 100.64.0.0/10 address`);
+  if (tlsMode && !mesh) problems.push(`SQUADZ_TLS "${tlsMode}" is unknown (use "internal" or leave unset)`);
+  if (mesh) {
+    if (get("CHAT_FQDN") && get("CHAT_FQDN") === get("RTC_FQDN")) problems.push("CHAT_FQDN and RTC_FQDN must differ");
+    if (tlsMode === "internal" && !String(get("COMPOSE_FILE")).includes("docker-compose.mesh.yml")) {
+      problems.push("COMPOSE_FILE must include docker-compose.mesh.yml in mesh mode (Caddy needs SQUADZ_TLS and lk-jwt-service needs the CA)");
+    }
+  }
+  return problems;
+}
+
+/** Per-OS instructions for trusting the exported Caddy root CA. */
+export function caTrustInstructions(file = CA_FILE) {
+  return `Trust ${file} on every device that opens https://CHAT_FQDN/ (one time per device):
+
+Windows (current user, no admin needed):
+  certutil -user -addstore Root ${file}
+macOS:
+  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${file}
+Linux (system store; used by curl/Node, not by browsers):
+  sudo cp ${file} /usr/local/share/ca-certificates/squadz-ca.crt && sudo update-ca-certificates
+Chrome / Edge / Brave: use the OS store on Windows and macOS. On Linux import it under
+  chrome://settings/certificates > Authorities.
+Firefox (all OSes, own store): Settings > Privacy & Security > Certificates > View Certificates >
+  Authorities > Import, tick "Trust this CA to identify websites".
+iOS / iPadOS: AirDrop or email ${file}, open it, Settings > "Profile Downloaded" > Install; then
+  Settings > General > About > Certificate Trust Settings > enable full trust for the Caddy root.
+Android: Settings > Security > Encryption & credentials > Install a certificate > CA certificate.
+
+Honest limit: Android apps (including Element X) ignore user-installed CAs by default, so
+Element X on Android will most likely refuse https://CHAT_FQDN. For this mesh-only test use the
+hosted web client in a desktop browser (or a phone browser after installing the CA). Phones
+with Element X need a real domain with a public certificate (docs/DEPLOY.md).`;
+}
+
 /** Which secrets the user must copy (shown once, deliberately). */
 export const COPY_ONCE = ["SQUADZ_ADMIN_PASSWORD"];
 
@@ -122,6 +229,31 @@ export function checkDns(name, fqdn, meshIp, addrs) {
     return fail(label, `resolves to ${addrs.join(", ")}`, `Edit the A record for ${fqdn} to ${meshIp}. If your router returns nothing, see DNS rebinding in docs/SETUP.md.`);
   }
   return ok(label, addrs.join(", "));
+}
+
+/** Mesh mode: the hostname must resolve (hosts file) to MESH_IP on this machine. */
+export function checkMeshHost(fqdn, meshIp, addrs) {
+  const label = `host ${fqdn} -> ${meshIp} (local resolution)`;
+  if (!addrs || addrs.length === 0) {
+    return fail(label, "does not resolve", `Add this line to your hosts file (Linux/macOS /etc/hosts, Windows C:\\Windows\\System32\\drivers\\etc\\hosts): ${meshIp} ${fqdn}`);
+  }
+  if (!addrs.includes(meshIp)) {
+    return fail(label, `resolves to ${addrs.join(", ")}`, `Fix the hosts entry so ${fqdn} points at ${meshIp}.`);
+  }
+  return ok(label, addrs.join(", "));
+}
+
+/** Mesh mode: the served cert must verify against the exported CA (squadz-ca.crt). */
+export function checkMeshTls(fqdn, caPem, res, now = new Date()) {
+  const label = `TLS ${fqdn} chains to ${CA_FILE}`;
+  if (!caPem) return fail(label, `${CA_FILE} missing or empty`, "Run: docker compose up -d caddy && node scripts/squadz.mjs ca export");
+  if (!res) return fail(label, "no certificate presented", "Check `docker compose logs caddy`.");
+  if (res.error) return fail(label, res.error, "If the CA changed (caddy_data volume recreated) re-run `squadz ca export` and re-trust it on every device.");
+  const days = Math.floor((new Date(res.validTo) - now) / 86400000);
+  if (Number.isNaN(days)) return fail(label, `unreadable expiry "${res.validTo}"`, "Restart caddy and retry.");
+  if (days < 0) return fail(label, `expired ${-days}d ago`, "docker compose restart caddy.");
+  if (res.authorized === false) return fail(label, "certificate does not chain to the exported CA", "Re-run `node scripts/squadz.mjs ca export` (the CA may have been regenerated) and re-trust it.");
+  return ok(label, `valid, ${days}d left`);
 }
 
 export function checkPort(meshIp, port, reachable) {
@@ -202,11 +334,26 @@ export function checkContainers(entries, wanted = COMPOSE_SERVICES) {
  */
 export async function runDoctor(env, io, now = new Date()) {
   const { CHAT_FQDN: chat, RTC_FQDN: rtc, MESH_IP: ip } = env;
+  const mesh = isInternalTls(env);
   const safe = async (f, dflt) => { try { return await f(); } catch { return dflt; } };
   const results = [];
-  for (const fqdn of [chat, rtc]) results.push(checkDns("dns", fqdn, ip, await safe(() => io.resolve4(fqdn), [])));
+  if (mesh) {
+    // No public DNS / ACME: names must resolve locally (hosts file) and the cert must chain to the exported CA.
+    const resolve = io.resolveLocal ?? io.resolve4;
+    for (const fqdn of [chat, rtc]) results.push(checkMeshHost(fqdn, ip, await safe(() => resolve(fqdn), [])));
+  } else {
+    for (const fqdn of [chat, rtc]) results.push(checkDns("dns", fqdn, ip, await safe(() => io.resolve4(fqdn), [])));
+  }
   for (const port of [443, 7881]) results.push(checkPort(ip, port, await safe(() => io.tcp(ip, port), false)));
-  for (const fqdn of [chat, rtc]) results.push(checkTls(fqdn, await safe(() => io.cert(ip, fqdn), null), now));
+  if (mesh) {
+    const caPem = await safe(async () => (io.readCa ? await io.readCa() : null), null);
+    for (const fqdn of [chat, rtc]) {
+      const res = caPem ? await safe(() => io.certChain(ip, fqdn, caPem), null) : null;
+      results.push(checkMeshTls(fqdn, caPem, res, now));
+    }
+  } else {
+    for (const fqdn of [chat, rtc]) results.push(checkTls(fqdn, await safe(() => io.cert(ip, fqdn), null), now));
+  }
   results.push(checkWellKnown(chat, rtc, await safe(() => io.getJson(`https://${chat}/.well-known/matrix/client`), null)));
   results.push(checkVersions(await safe(() => io.getJson(`https://${chat}/_matrix/client/versions`), null)));
   results.push(checkJwtHealth(rtc, await safe(() => io.getStatus(`https://${rtc}/livekit/jwt/healthz`), 0)));

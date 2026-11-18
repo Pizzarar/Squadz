@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateEnvForMode } from './lib/ops.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -502,6 +503,34 @@ check('Hosted web client: pinned Cinny + sha256, rendered config, Caddy catch-al
   assert(chat.includes('X-Frame-Options SAMEORIGIN') && chat.includes("frame-ancestors 'self'"), 'Cinny block needs SAMEORIGIN + frame-ancestors for Element Call');
   assert(!/^\s*Permissions-Policy\b/mi.test(chat), 'must not set Permissions-Policy (breaks camera/mic/screen share)');
   return 'Cinny pinned+verified, config locked, catch-all handler last';
+});
+
+// 10. Mesh-only mode (P4 block E1): internal TLS needs no Cloudflare token, lk-jwt trusts the CA (no skip-verify)
+check('Mesh-only mode: overlay, (internal) snippet, .env accepted without a Cloudflare token', () => {
+  const caddyfile = readFileRel('caddy/Caddyfile');
+  assert(/\(internal\) \{\s*tls internal\s*\}/.test(caddyfile), 'Caddyfile missing (internal) { tls internal } snippet');
+  const overlay = readFileRel('docker-compose.mesh.yml');
+  const code = overlay.replace(/^\s*#.*$/gm, '');
+  assert(/SQUADZ_TLS:\s*"internal"/.test(code), 'docker-compose.mesh.yml must set caddy SQUADZ_TLS=internal');
+  assert(/SSL_CERT_FILE:\s*"\/ca\/root\.crt"/.test(code) && code.includes('./squadz-ca.crt:/ca/root.crt:ro'), 'docker-compose.mesh.yml must mount squadz-ca.crt for lk-jwt-service');
+  assert(!code.includes('INSECURE_SKIP_VERIFY'), 'docker-compose.mesh.yml must not disable TLS verification');
+  assert(readFileRel('.gitignore').includes('squadz-ca.crt'), 'squadz-ca.crt must be gitignored');
+  const envExample = readFileRel('.env.example');
+  const known = new Set([...envExample.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]));
+  for (const m of code.matchAll(/\$\{([A-Z0-9_]+)/g)) assert(known.has(m[1]), `docker-compose.mesh.yml references \${${m[1]}} missing from .env.example`);
+  // A mesh-only env with an empty Cloudflare token must be accepted; the real-domain mode must still insist on it.
+  const meshEnv = { CHAT_FQDN: 'chat.squadz.mesh', RTC_FQDN: 'rtc.squadz.mesh', MESH_IP: '100.64.0.1', LIVEKIT_API_KEY: 'k', LIVEKIT_API_SECRET: 's', TUWUNEL_REGISTRATION_TOKEN: 't', SQUADZ_TLS: 'internal', COMPOSE_FILE: 'docker-compose.yml:docker-compose.mesh.yml', CLOUDFLARE_API_TOKEN: '' };
+  assert(validateEnvForMode(meshEnv).length === 0, `mesh env rejected: ${validateEnvForMode(meshEnv).join('; ')}`);
+  assert(validateEnvForMode({ ...meshEnv, SQUADZ_TLS: '' }).some((p) => p.includes('CLOUDFLARE_API_TOKEN')), 'real-domain mode must still require CLOUDFLARE_API_TOKEN');
+  const dotenv = path.join(ROOT, '.env');
+  let detail = 'overlay + snippet verified';
+  if (fs.existsSync(dotenv)) {
+    const envMap = parseEnvFile(fs.readFileSync(dotenv, 'utf8'));
+    const problems = validateEnvForMode(envMap);
+    assert(problems.length === 0, `.env: ${problems.join('; ')}`);
+    detail += `; .env OK (${envMap.get('SQUADZ_TLS') ? 'mesh-only' : 'real-domain'} mode)`;
+  }
+  return detail;
 });
 
 // Print summary report

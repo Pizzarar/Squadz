@@ -1,0 +1,30 @@
+# Squadz · mesh-only overlay (no domain, no Cloudflare). Written into COMPOSE_FILE by
+# `node scripts/squadz.mjs setup --mesh-only`, so plain `docker compose up -d` picks it up.
+#
+# - Caddy issues certs from its own local CA (`tls internal`, snippet `(internal)` in caddy/Caddyfile).
+# - lk-jwt-service validates Matrix OpenIDs by calling https://CHAT_FQDN, so it must trust that CA.
+#   We mount ONLY Caddy's public root cert (squadz-ca.crt, produced by `squadz ca export`) as
+#   SSL_CERT_FILE. We deliberately do NOT use LIVEKIT_INSECURE_SKIP_VERIFY_TLS (what the throwaway
+#   CI overlay does as a fallback): skipping verification would let anything on the mesh
+#   impersonate the homeserver and mint LiveKit tokens. The scratch image has no system CAs, and
+#   lk-jwt only ever talks to CHAT_FQDN, so the single root is all it needs.
+# - squadz-ca.crt must exist before `up` (setup creates an empty placeholder; export fills it).
+#   If you re-export, `docker compose restart lk-jwt-service`.
+
+services:
+  caddy:
+    environment:
+      SQUADZ_TLS: "internal"
+
+  lk-jwt-service:
+    environment:
+      SSL_CERT_FILE: "/ca/root.crt"
+    volumes:
+      - ./squadz-ca.crt:/ca/root.crt:ro
+
+  soundboard:
+    environment:
+      SSL_CERT_FILE: "/ca/root.crt"
+      NODE_EXTRA_CA_CERTS: "/ca/root.crt"
+    volumes:
+      - ./squadz-ca.crt:/ca/root.crt:ro

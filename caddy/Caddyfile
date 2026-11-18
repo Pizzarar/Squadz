@@ -17,6 +17,12 @@
 	tls internal
 }
 
+# Mesh-only mode (no domain, no Cloudflare): docker-compose.mesh.yml sets SQUADZ_TLS=internal.
+# Same behaviour as internal_tls; the shorter name is what `squadz setup --mesh-only` writes to .env.
+(internal) {
+	tls internal
+}
+
 https://{$CHAT_FQDN} {
 	import {$SQUADZ_TLS:dns_tls}
 

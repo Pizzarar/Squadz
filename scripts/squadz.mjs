@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import tls from "node:tls";
+import https from "node:https";
 import { fileURLToPath } from "node:url";
 
 import { loadEnvFile, resolveConfig } from "./lib/config.mjs";
@@ -23,7 +24,8 @@ import { probePushGateway } from "./lib/push.mjs";
 import { addEmoji, listEmoji, removeEmoji } from "./lib/emoji.mjs";
 import {
   COPY_ONCE, buildEnvValues, buildInviteMessage, generateSecrets, listUsers, obtainToken,
-  parseMeshIp, renderEnv, runDoctor, formatDoctor, setRole, syncMembers, validateSetupInputs,
+  parseMeshIp, parseNordLocalIp, isInternalTls, validateMeshInputs, buildMeshEnvValues, hostsLine,
+  caTrustInstructions, CA_FILE, CADDY_ROOT_CA_PATH, MESH_DEFAULT_CHAT, MESH_DEFAULT_RTC, renderEnv, runDoctor, formatDoctor, setRole, syncMembers, validateSetupInputs,
   ROLE_LEVELS, backupFileName, buildServiceUnits, parseBackupTime, parseKeep, selectBackupsToPrune,
 } from "./lib/ops.mjs";
 
@@ -34,6 +36,12 @@ const USAGE = `squadz: ops CLI
 
 Usage: node scripts/squadz.mjs <command> [options]
 
+  setup --mesh-only [--force] [--mesh-ip IP] [--chat-host H] [--rtc-host H] [--admin-user U]
+        No domain, no Cloudflare: Caddy issues certs from its own CA (SQUADZ_TLS=internal). Hostnames default to
+        chat.squadz.mesh / rtc.squadz.mesh; each device maps them to the mesh IP in its hosts file.
+        See docs/DEPLOY-MESHNET.md.
+  ca export [--out squadz-ca.crt]
+        Copy Caddy's local root CA out of the container and print per-OS trust steps.
   setup [--force] [--domain D] [--cloudflare-token T] [--mesh-ip IP] [--email E] [--admin-user U]
         Write .env (prompts for anything not given as a flag). Refuses to overwrite .env without --force.
   doctor                       Check DNS, ports, TLS, well-known, Matrix, lk-jwt and containers.
@@ -74,7 +82,7 @@ Global: --env-file <path> (default ./.env)  -h, --help
 export function parseArgs(argv) {
   const flags = {};
   const pos = [];
-  const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "keep", "backup-at", "env-file", "icon", "welcome"]);
+  const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "keep", "backup-at", "env-file", "icon", "welcome", "chat-host", "rtc-host"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h") flags.help = true;
@@ -132,12 +140,14 @@ async function adminClient(log) {
 // ---------------------------------------------------------------------------
 // setup
 
-function detectMeshIp() {
-  const tries = [["tailscale", ["ip", "-4"]], ["nordvpn", ["meshnet", "peer", "list"]]];
+function detectMeshIp(meshOnly = false) {
+  const tries = meshOnly
+    ? [["nordvpn", ["meshnet", "peer", "list"]], ["tailscale", ["ip", "-4"]]]
+    : [["tailscale", ["ip", "-4"]], ["nordvpn", ["meshnet", "peer", "list"]]];
   for (const [cmd, args] of tries) {
     const r = run(cmd, args);
     if (r.status === 0) {
-      const ip = parseMeshIp(r.stdout);
+      const ip = cmd === "nordvpn" ? parseNordLocalIp(r.stdout) : parseMeshIp(r.stdout);
       if (ip) return { ip, via: cmd };
     }
   }
@@ -158,6 +168,7 @@ async function cmdSetup(flags) {
     return a || dflt || "";
   };
   try {
+    if (flags["mesh-only"]) return await setupMesh(flags, envFile, ask);
     const domain = await ask("Domain (e.g. example.com)", flags.domain);
     const cloudflareToken = await ask("Cloudflare API token (Zone:DNS:Edit)", flags["cloudflare-token"] ?? process.env.CLOUDFLARE_API_TOKEN);
     const detected = flags["mesh-ip"] ? null : detectMeshIp();
@@ -188,8 +199,103 @@ async function cmdSetup(flags) {
   }
 }
 
+/** setup --mesh-only: no domain, no Cloudflare token, Caddy internal CA. */
+async function setupMesh(flags, envFile, ask) {
+  const detected = flags["mesh-ip"] ? null : detectMeshIp(true);
+  if (detected) console.log(`Detected mesh IP ${detected.ip} via ${detected.via}.`);
+  const meshIp = await ask("Mesh IP (100.x.y.z)", flags["mesh-ip"], detected?.ip);
+  const chatHost = (flags["chat-host"] ?? MESH_DEFAULT_CHAT).toLowerCase();
+  const rtcHost = (flags["rtc-host"] ?? MESH_DEFAULT_RTC).toLowerCase();
+  const adminUser = await ask("Admin username", flags["admin-user"], "admin");
+  const problems = validateMeshInputs({ meshIp, chatHost, rtcHost });
+  if (problems.length) throw new Error(`setup input problems:\n  - ${problems.join("\n  - ")}`);
+
+  const secrets = generateSecrets();
+  const values = buildMeshEnvValues({ meshIp, chatHost, rtcHost, adminUser, secrets });
+  const template = fs.readFileSync(path.join(root, ".env.example"), "utf8");
+  fs.writeFileSync(envFile, renderEnv(template, values), { mode: 0o600 });
+  fs.chmodSync(envFile, 0o600);
+  // Placeholder so the compose bind mount (lk-jwt-service CA) is a file, not a directory docker invents.
+  const caPath = path.join(path.dirname(path.resolve(envFile)), CA_FILE);
+  if (!fs.existsSync(caPath)) fs.writeFileSync(caPath, "");
+
+  console.log(`\nWrote ${envFile} (mode 600), mesh-only mode (SQUADZ_TLS=internal, no Cloudflare token).`);
+  console.log(`\nCopy this now; it is the only time it is printed (also readable in .env):`);
+  for (const k of COPY_ONCE) console.log(`  ${k}=${secrets[k]}`);
+  console.log(`\nNext:`);
+  console.log(`  1. Hosts entry on THIS host and on every device (Windows: C:\\Windows\\System32\\drivers\\etc\\hosts, as admin):`);
+  console.log(`       ${hostsLine(meshIp, chatHost, rtcHost)}`);
+  console.log(`  2. docker compose up -d caddy`);
+  console.log(`  3. node scripts/squadz.mjs ca export      (then trust squadz-ca.crt on each device)`);
+  console.log(`  4. docker compose up -d --build`);
+  console.log(`  5. node scripts/squadz.mjs doctor && node scripts/bootstrap.mjs --env-file .env`);
+  console.log(`Full walkthrough: docs/DEPLOY-MESHNET.md`);
+}
+
+// ---------------------------------------------------------------------------
+// ca export
+
+export function cmdCaExport(flags, deps = {}) {
+  const runFn = deps.run ?? run;
+  const out = path.resolve(flags.out ?? path.join(root, CA_FILE));
+  const tmp = `${out}.tmp`;
+  const r = runFn("docker", ["compose", "cp", `caddy:${CADDY_ROOT_CA_PATH}`, tmp]);
+  if (r.error || r.status !== 0 || !fs.existsSync(tmp) || fs.statSync(tmp).size === 0) {
+    fs.rmSync(tmp, { force: true });
+    throw new Error(`could not copy Caddy's root CA (${r.error?.message ?? r.stderr?.trim() ?? "empty file"}). Is Caddy up and has it served a request? Try: docker compose up -d caddy; docker compose logs caddy`);
+  }
+  // Write in place (not rename) so a bind-mounted file keeps its inode.
+  fs.writeFileSync(out, fs.readFileSync(tmp));
+  fs.rmSync(tmp, { force: true });
+  const log = deps.log ?? console.log;
+  log(`Exported Caddy root CA to ${out}`);
+  log("It is a PUBLIC certificate (no private key): safe to share with your friends.\n");
+  log(caTrustInstructions(path.basename(out)));
+  log("\nIf lk-jwt-service was already running, restart it so it picks up the CA: docker compose restart lk-jwt-service");
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // doctor / update
+
+/** Local name resolution (hosts file + system resolver), as a browser would see it. */
+async function resolveLocal(h) {
+  const all = await dns.lookup(h, { all: true, family: 4 });
+  return all.map((a) => a.address);
+}
+
+/** Mesh-mode doctor I/O: talk to MESH_IP directly with the right SNI/Host, trusting only squadz-ca.crt. */
+function meshIo(env) {
+  const caFile = path.join(root, CA_FILE);
+  const readCa = () => (fs.existsSync(caFile) && fs.statSync(caFile).size > 0 ? fs.readFileSync(caFile, "utf8") : null);
+  const req = (url) => new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const r = https.request({ host: env.MESH_IP, port: 443, servername: u.hostname, path: u.pathname + u.search, headers: { host: u.hostname }, ca: readCa() ?? undefined, timeout: 8000 }, (res) => {
+      let body = "";
+      res.on("data", (c) => { body += c; });
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    });
+    r.once("error", reject);
+    r.once("timeout", () => r.destroy(new Error("timed out")));
+    r.end();
+  });
+  return {
+    resolveLocal,
+    readCa,
+    // rejectUnauthorized stays false so we can read s.authorized / authorizationError instead of aborting.
+    certChain: (ip, servername, ca) => new Promise((res) => {
+      const s = tls.connect({ host: ip, port: 443, servername, ca, timeout: 5000, rejectUnauthorized: false }, () => {
+        const c = s.getPeerCertificate();
+        res({ authorized: s.authorized, validTo: c.valid_to });
+        s.destroy();
+      });
+      s.once("error", (e) => res({ error: e.message }));
+      s.once("timeout", () => { s.destroy(); res({ error: "TLS handshake timed out" }); });
+    }),
+    getJson: async (url) => { const r = await req(url); return r.status >= 200 && r.status < 300 ? JSON.parse(r.body) : null; },
+    getStatus: async (url) => (await req(url)).status,
+  };
+}
 
 function realIo(env) {
   return {
@@ -235,7 +341,8 @@ function realIo(env) {
 
 async function cmdDoctor(flags) {
   loadEnv(flags);
-  const results = await runDoctor(process.env, realIo(process.env));
+  const io = isInternalTls(process.env) ? { ...realIo(process.env), ...meshIo(process.env) } : realIo(process.env);
+  const results = await runDoctor(process.env, io);
   console.log(formatDoctor(results));
   return results.every((r) => r.ok) ? 0 : 1;
 }
@@ -525,6 +632,7 @@ async function main() {
   if (!cmd || cmd === "-h" || cmd === "--help" || flags.help) return void process.stdout.write(USAGE);
   switch (cmd) {
     case "setup": return cmdSetup(flags);
+    case "ca": if (pos[0] !== "export") throw new Error("usage: ca export [--out squadz-ca.crt]"); return void cmdCaExport(flags);
     case "doctor": return process.exit(await cmdDoctor(flags));
     case "invite": return cmdInvite(flags);
     case "role": return cmdRole(flags, pos);
