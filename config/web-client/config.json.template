@@ -1,0 +1,7 @@
+{
+  "defaultHomeserver": 0,
+  "homeserverList": ["__CHAT_FQDN__"],
+  "allowCustomHomeservers": false,
+  "featuredCommunities": { "openAsDefault": false, "spaces": [], "rooms": [], "servers": [] },
+  "hashRouter": { "enabled": false, "basename": "/" }
+}

@@ -32,10 +32,16 @@ peer-to-peer mesh before Element can reach it.
 > On desktop, make sure the mesh app stays running (and "allow LAN/mesh traffic"
 > is on). On phones, leave the mesh app installed; Element will route through it.
 
-## 2. Install Element
+## 2. Pick your client
 
 - **Phone:** install **Element X** from the App Store / Play Store.
-- **Desktop:** install **Element** from element.io (or your package manager).
+- **Desktop (nothing to install):** with the mesh app connected, open
+  `https://chat.<YOUR_DOMAIN>/` in Chrome, Edge or Firefox. That is the Squadz web
+  client (Cinny): the server is already filled in and locked, so skip the "server name"
+  step below. Click **Register**, pick a username and password, paste the registration
+  token. Voice/video: open a room and use the call buttons in the header.
+- **Desktop app (optional):** **Element** from element.io also works; follow the server
+  steps below.
 
 ## 3. Create your account (sign up with the token)
 

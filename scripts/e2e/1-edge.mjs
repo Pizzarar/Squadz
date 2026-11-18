@@ -59,4 +59,40 @@ run(async () => {
       assertEq(a.status, 200, `/golive/${asset} status`);
     }
   });
+  await step("hosted web client (Cinny) at / with SPA fallback and locked config", async () => {
+    const root = await fetch(`${cfg.chatUrl}/`);
+    assertEq(root.status, 200, "/ status");
+    const html = await root.text();
+    assert(/<title>\s*Cinny/i.test(html) || /cinny/i.test(html), "/ returns Cinny's index.html");
+    assertEq(root.headers.get("x-frame-options"), "SAMEORIGIN", "X-Frame-Options");
+    assert(
+      (root.headers.get("content-security-policy") ?? "").includes("frame-ancestors 'self'"),
+      "CSP frame-ancestors 'self'",
+    );
+    assert(!root.headers.has("permissions-policy"), "no Permissions-Policy header (breaks screen share)");
+
+    const conf = await fetch(`${cfg.chatUrl}/config.json`);
+    assertEq(conf.status, 200, "/config.json status");
+    assert((conf.headers.get("cache-control") ?? "").includes("no-cache"), "config.json is not cached");
+    const c = await conf.json();
+    assertEq(c.homeserverList, [cfg.chatFqdn], "homeserverList locked to CHAT_FQDN");
+    assertEq(c.defaultHomeserver, 0, "defaultHomeserver");
+    assertEq(c.allowCustomHomeservers, false, "allowCustomHomeservers");
+    assertEq(c.featuredCommunities?.rooms, [], "no featured public rooms");
+
+    const deep = await fetch(`${cfg.chatUrl}/some/deep/link`);
+    assertEq(deep.status, 200, "SPA fallback status");
+    assert((await deep.text()).includes("<html"), "SPA fallback serves index.html");
+
+    const ec = await fetch(`${cfg.chatUrl}/public/element-call/index.html`);
+    assertEq(ec.status, 200, "bundled Element Call widget status");
+
+    // Cinny's catch-all must not shadow the other routes.
+    const v = await fetch(`${cfg.chatUrl}/_matrix/client/versions`);
+    assert(Array.isArray((await v.json()).versions), "/_matrix still proxied to Tuwunel");
+    const wk = await fetch(`${cfg.chatUrl}/.well-known/matrix/client`);
+    assert(Boolean((await wk.json())["org.matrix.msc4143.rtc_foci"]), "well-known still served");
+    const g = await fetch(`${cfg.chatUrl}/golive/`);
+    assertEq(g.status, 200, "/golive/ still served");
+  });
 });

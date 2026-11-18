@@ -21,6 +21,7 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web/golive:/srv/golive:ro
+      - ./config/web-client/config.json.template:/etc/squadz/web-client/config.json.template:ro
       - caddy_data:/data
       - caddy_config:/config
     extra_hosts:
