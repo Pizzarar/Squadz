@@ -477,13 +477,36 @@ export function parseBackupTime(v = "04:00") {
 const q = (s) => (/[\s"\\]/.test(s) ? `"${s.replace(/(["\\])/g, "\\$1")}"` : s);
 
 /**
+ * Screen a value before it is interpolated into a unit file, then escape it.
+ *
+ * Unit files are line-oriented (`Setting=value` per line) and `%` introduces a
+ * systemd specifier, so a newline/NUL/control character cannot be represented
+ * at all, a leading `-` reads as an ExecStart failure prefix, and `%` must be
+ * doubled. Throws a message naming the offending input; returns the escaped
+ * value.
+ */
+function unitValue(field, value) {
+  const s = String(value ?? "");
+  const show = JSON.stringify(s);
+  if (!s) throw new Error(`${field}: refusing an empty value in the systemd unit`);
+  if (s.includes("\0")) throw new Error(`${field}: a NUL byte cannot be written to a systemd unit ${show}`);
+  if (/[\r\n]/.test(s)) throw new Error(`${field}: a newline cannot be written to a systemd unit ${show}`);
+  if (/[\x01-\x1f\x7f]/.test(s)) throw new Error(`${field}: control characters cannot be written to a systemd unit ${show}`);
+  if (s.startsWith("-")) throw new Error(`${field}: must not start with "-" (systemd reads it as a command prefix) ${show}`);
+  return s.replace(/%/g, "%%");
+}
+
+/**
  * Pure: the systemd unit files.
  * @param {{repoDir:string, nodePath:string, dockerPath?:string, backupAt?:string, keep?:number}} o
  * @returns {Record<string,string>} file name -> contents
  */
 export function buildServiceUnits({ repoDir, nodePath, dockerPath = "/usr/bin/docker", backupAt = "04:00", keep = DEFAULT_KEEP }) {
   const at = parseBackupTime(backupAt);
-  const script = `${repoDir}/scripts/squadz.mjs`;
+  const dir = unitValue("repoDir", repoDir);
+  const node = unitValue("nodePath", nodePath);
+  const docker = unitValue("dockerPath", dockerPath);
+  const script = `${dir}/scripts/squadz.mjs`;
   return {
     "squadz.service": `[Unit]
 Description=Squadz stack (docker compose up -d)
@@ -494,9 +517,9 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=${repoDir}
-ExecStart=${q(dockerPath)} compose up -d
-ExecStop=${q(dockerPath)} compose stop
+WorkingDirectory=${q(dir)}
+ExecStart=${q(docker)} compose up -d
+ExecStop=${q(docker)} compose stop
 TimeoutStartSec=300
 
 [Install]
@@ -508,8 +531,8 @@ After=docker.service squadz.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=${repoDir}
-ExecStart=${q(nodePath)} ${q(script)} backup --keep ${keep}
+WorkingDirectory=${q(dir)}
+ExecStart=${q(node)} ${q(script)} backup --keep ${keep}
 `,
     "squadz-backup.timer": `[Unit]
 Description=Squadz nightly backup at ${at}

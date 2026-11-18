@@ -47,6 +47,35 @@ test("units: --backup-at and --keep are honoured, paths with spaces are quoted, 
   assert.deepEqual(buildServiceUnits(o), u);
 });
 
+test("units: WorkingDirectory is quoted for a repo dir with a space", () => {
+  const u = buildServiceUnits({ repoDir: "/srv/my squadz", nodePath: "/usr/bin/node" });
+  assert.match(u["squadz.service"], /^WorkingDirectory="\/srv\/my squadz"$/m);
+  assert.match(u["squadz-backup.service"], /^WorkingDirectory="\/srv\/my squadz"$/m);
+});
+
+test("units: % is doubled as %% in every interpolated value (systemd specifier escape)", () => {
+  const u = buildServiceUnits({ repoDir: "/srv/100% squadz", nodePath: "/opt/node%20/bin/node" });
+  assert.match(u["squadz.service"], /^WorkingDirectory="\/srv\/100%% squadz"$/m);
+  assert.match(u["squadz-backup.service"], /^WorkingDirectory="\/srv\/100%% squadz"$/m);
+  assert.match(u["squadz-backup.service"], /^ExecStart=\/opt\/node%%20\/bin\/node "\/srv\/100%% squadz\/scripts\/squadz\.mjs" backup --keep 14$/m);
+  // no lone % survives in any unit: every one must be part of a %%
+  for (const [name, text] of Object.entries(u)) {
+    assert.equal((text.match(/(?<!%)%(?!%)/g) ?? []).length, 0, `${name} has a lone %`);
+  }
+});
+
+test("units: paths systemd cannot represent are rejected with a clear error", () => {
+  const base = { repoDir: "/srv/squadz", nodePath: "/usr/bin/node" };
+  for (const bad of ["/srv/a\nb", "/srv/a\rb"]) {
+    assert.throws(() => buildServiceUnits({ ...base, repoDir: bad }), /repoDir: a newline cannot be written to a systemd unit/);
+  }
+  assert.throws(() => buildServiceUnits({ ...base, repoDir: "/srv/a\0b" }), /repoDir: a NUL byte cannot be written/);
+  assert.throws(() => buildServiceUnits({ ...base, repoDir: "/srv/a\tb" }), /repoDir: control characters cannot be written/);
+  assert.throws(() => buildServiceUnits({ ...base, nodePath: "/usr/bin/no\nde" }), /nodePath: a newline cannot be written/);
+  assert.throws(() => buildServiceUnits({ ...base, repoDir: "" }), /repoDir: refusing an empty value/);
+  assert.throws(() => buildServiceUnits({ ...base, nodePath: "-node" }), /nodePath: must not start with "-"/);
+});
+
 test("parseBackupTime / parseKeep validate input", () => {
   assert.equal(parseBackupTime(undefined), "04:00");
   assert.equal(parseBackupTime("23:59"), "23:59");
