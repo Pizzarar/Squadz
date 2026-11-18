@@ -1,6 +1,8 @@
 # Squadz · Deploy runbook (zero to running)
 
 Written for Aub: an Ubuntu box, a Tailscale account, a domain on Cloudflare. About 30 minutes.
+
+> Just testing over NordVPN Meshnet, no domain? Use [DEPLOY-MESHNET.md](DEPLOY-MESHNET.md) (`squadz setup --mesh-only`) instead of this runbook.
 Everything operational goes through one tool: `node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|backup|restore|service|update>`
 (`node scripts/squadz.mjs --help`). Background and troubleshooting live in [SETUP.md](SETUP.md).
 

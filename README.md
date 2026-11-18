@@ -37,5 +37,6 @@ node scripts/bootstrap.mjs
 - [`web/golive/`](web/): Static high-FPS screen-share web app served at `https://<CHAT_FQDN>/golive/`.
 - [`docs/`](docs/):
   - [`docs/SETUP.md`](docs/SETUP.md) — Host, mesh, Cloudflare DNS-01, first boot, and troubleshooting guide.
+  - [`docs/DEPLOY-MESHNET.md`](docs/DEPLOY-MESHNET.md) — First test over NordVPN Meshnet with no domain and no Cloudflare (internal TLS, CA trust, browser voice call).
   - `docs/ONBOARDING.md` — Friend guide for Element X and Element Desktop.
   - `docs/STREAMING.md` — High-FPS streaming codec, bitrate, and bandwidth guide.
