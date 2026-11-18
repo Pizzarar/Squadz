@@ -1,5 +1,7 @@
 # Squadz · Host & Mesh Setup Guide
 
+> **Deploying for the first time?** Follow the step-by-step runbook in [DEPLOY.md](DEPLOY.md) (it drives everything through `node scripts/squadz.mjs`). This page is the reference: architecture, mesh options, DNS and troubleshooting.
+
 Self-hosted private Matrix chat (**Tuwunel**) + MatrixRTC voice/video (**LiveKit** + **lk-jwt-service**) behind **Caddy** with real-domain TLS via ACME DNS-01. All traffic binds exclusively to your L3 mesh IP (`<MESH_IP>`)—zero ports are exposed to the public internet.
 
 ---
@@ -26,11 +28,23 @@ Two subdomains under `<SQUADZ_DOMAIN>` point to `<MESH_IP>`:
 
 ---
 
-## 2. L3 Mesh Setup (NordVPN Meshnet or Tailscale)
+## 2. L3 Mesh Setup (Tailscale default, NordVPN Meshnet alternative)
 
 Every participant (and the Docker host) joins a shared L3 mesh network assigning CGNAT `100.x.y.z` IPv4 addresses.
 
-### Option A: NordVPN Meshnet
+### Option A: Tailscale (default)
+1. Install Tailscale on the host and authenticate:
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up
+   ```
+2. Retrieve the host's Tailscale IPv4 address (`100.x.y.z`):
+   ```bash
+   tailscale ip -4
+   ```
+3. Invite friends into your tailnet (Users > Invite external users) or share the host machine with them (Machines > Share). The free plan covers 3 users.
+
+### Option B: NordVPN Meshnet (alternative)
 1. Install the NordVPN Linux client on the host and log in:
    ```bash
    sh <(curl -sSf https://downloads.nordcdn.com/apps/linux/install.sh)
@@ -46,19 +60,7 @@ Every participant (and the Docker host) joins a shared L3 mesh network assigning
    nordvpn meshnet peer incoming allow <PEER_HOSTNAME_OR_IP>
    ```
 
-### Option B: Tailscale
-1. Install Tailscale on the host and authenticate:
-   ```bash
-   curl -fsSL https://tailscale.com/install.sh | sh
-   sudo tailscale up
-   ```
-2. Retrieve the host's Tailscale IPv4 address (`100.x.y.z`):
-   ```bash
-   tailscale ip -4
-   ```
-3. Share the host node with friends via Tailscale **Node Sharing** or invite them into your Tailnet.
-
-Record this `100.x.y.z` address—it is your `MESH_IP` in `.env`.
+Record this `100.x.y.z` address—it is your `MESH_IP` in `.env`. `node scripts/squadz.mjs setup` detects it for you (`tailscale ip -4`, then `nordvpn meshnet peer list`).
 
 ---
 
@@ -88,7 +90,7 @@ In your Cloudflare DNS dashboard for `<SQUADZ_DOMAIN>`, create two **DNS-only** 
 ## 4. Environment Configuration & First Boot
 
 ### 4.1 Generate `.env`
-Copy the template and generate random secrets:
+The easy way: `node scripts/squadz.mjs setup` (prompts for domain, Cloudflare token and mesh IP, generates every secret, writes `.env` mode 600, refuses to overwrite without `--force`). Manual alternative: copy the template and generate random secrets:
 
 ```bash
 cp .env.example .env
@@ -113,11 +115,12 @@ Fill in `.env` with your real values:
 - `SOUNDBOARD_MATRIX_USER=soundboard`
 - `SOUNDBOARD_MATRIX_PASSWORD=<BOT_PASSWORD>`
 
-### 4.2 Validate Statically
+### 4.2 Validate Statically and Run Doctor and Run Doctor
 Before booting, run the zero-dependency static validator (requires Node 20+):
 ```bash
 node scripts/validate.mjs
 ```
+Once the stack is up, `node scripts/squadz.mjs doctor` checks DNS, ports, TLS, discovery, the Matrix API, lk-jwt and the containers, printing a fix for every failure.
 
 ### 4.3 Start the Core Stack & Seed the Space
 1. Ensure your mesh interface (`nordlynx` or `tailscale0`) is up and owns `<MESH_IP>`.
@@ -138,6 +141,7 @@ node scripts/validate.mjs
    ```bash
    node scripts/bootstrap.mjs
    ```
+   Run this before friends register: the first registered user becomes the Tuwunel admin. Then `docker compose restart tuwunel` so `auto_join_rooms` (new accounts join the Space and rooms automatically) sees the rooms.
 6. *(Optional)* Start the soundboard bot container once its account and clips are ready (Block B3):
    ```bash
    docker compose --profile bots up -d soundboard

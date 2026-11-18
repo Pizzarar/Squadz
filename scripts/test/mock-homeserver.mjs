@@ -162,6 +162,51 @@ export function createMockHomeserver({ serverName, registrationToken }) {
         return json(res, 200, { room_id: roomId });
       }
 
+      // --- profile (user existence) -------------------------------------
+      const profileMatch = pathname.match(/^\/_matrix\/client\/v3\/profile\/(.+)$/);
+      if (req.method === "GET" && profileMatch) {
+        const userId = decodeURIComponent(profileMatch[1]);
+        const lp = userId.startsWith("@") ? userId.slice(1).split(":")[0] : userId;
+        if (!state.users.has(lp)) return error(res, 404, "M_NOT_FOUND", "Profile not found");
+        return json(res, 200, { displayname: lp });
+      }
+
+      // --- messages: send + timeline + simulated Tuwunel admin bot -------
+      const sendMatch = pathname.match(/^\/_matrix\/client\/v3\/rooms\/([^/]+)\/send\/m\.room\.message\/([^/]+)$/);
+      if (req.method === "PUT" && sendMatch) {
+        const room = state.rooms.get(decodeURIComponent(sendMatch[1]));
+        if (!room) return error(res, 404, "M_NOT_FOUND", "Unknown room");
+        room.timeline ??= [];
+        const sender = `@${actor() ?? "anon"}:${serverName}`;
+        state.counts.messages = (state.counts.messages ?? 0) + 1;
+        const eventId = `$msg${state.counts.messages}`;
+        room.timeline.push({ event_id: eventId, type: "m.room.message", sender, content: body });
+        // Simulated admin bot: Tuwunel replies in #admins to `!admin ...`.
+        if (room.alias === `#admins:${serverName}` && typeof body?.body === "string" && body.body.startsWith("!admin ")) {
+          let reply = null;
+          if (body.body.startsWith("!admin token issue")) {
+            const once = body.body.includes("--once");
+            state.issuedTokens ??= [];
+            const token = `tok${state.issuedTokens.length + 1}`;
+            state.issuedTokens.push({ token, once });
+            reply = `New registration token issued: \`${token}\` - ${once ? "one use" : "no limit"}`;
+          } else if (body.body === "!admin users list-users") {
+            const names = [...state.users.keys()].map((u) => `@${u}:${serverName}`);
+            reply = `Found ${names.length} local user account(s):\n\`\`\`\n${names.join("\n")}\n\`\`\``;
+          }
+          if (reply && !state.adminSilent) {
+            room.timeline.push({ event_id: `$bot${eventId}`, type: "m.room.message", sender: `@tuwunel:${serverName}`, content: { msgtype: "m.notice", body: reply } });
+          }
+        }
+        return json(res, 200, { event_id: eventId });
+      }
+      const msgsMatch = pathname.match(/^\/_matrix\/client\/v3\/rooms\/([^/]+)\/messages$/);
+      if (req.method === "GET" && msgsMatch) {
+        const room = state.rooms.get(decodeURIComponent(msgsMatch[1]));
+        if (!room) return error(res, 404, "M_NOT_FOUND", "Unknown room");
+        return json(res, 200, { chunk: [...(room.timeline ?? [])].reverse() });
+      }
+
       // --- media upload --------------------------------------------------
       if (req.method === "POST" && pathname === "/_matrix/media/v3/upload") {
         state.counts.upload++;
