@@ -20,22 +20,24 @@ import {
 run(async () => {
   const cfg = loadConfig();
   const state = readState();
+  const space = state.spaceId;
   const clips = state.roomIds?.clips;
   const lounge = state.roomIds?.lounge;
-  assert(clips && lounge && state.botUserId, "state.json has phase 2-4 output");
+  assert(space && clips && lounge && state.botUserId, "state.json has phase 2-4 output");
 
   const { client: admin } = await loggedInClient(cfg, cfg.adminUser, cfg.adminPassword);
 
-  await step("bot is online and joined #clips and #lounge", async () => {
-    for (const roomId of [clips, lounge]) {
+  await step("bot is online and joined the Space, #clips and #lounge", async () => {
+    // The bot joins every invited room during its first sync, so once all three
+    // memberships read "join" it has finished that sync and is long-polling (no
+    // extra settle sleep is needed before commanding it).
+    for (const roomId of [space, clips, lounge]) {
       await waitFor(
         `bot membership in ${roomId}`,
         async () => (await admin.getMember(roomId, state.botUserId))?.membership === "join",
         { timeoutMs: 120_000, intervalMs: 2_000 },
       );
     }
-    // The bot starts long-polling right after its first sync; give it a moment before commanding.
-    await new Promise((r) => setTimeout(r, 5_000));
   });
 
   await step("`!sb play beep in Lounge` makes the bot join the LiveKit room", async () => {

@@ -275,35 +275,6 @@ export function createMatrixClient(baseUrl) {
       }
     },
 
-    // --- Messages / profile (ops CLI) ------------------------------------
-
-    /** Send an m.text message. @returns {{ event_id: string }} */
-    sendText(roomId, body, txnId = `squadz-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`) {
-      return client.request(
-        "PUT",
-        `/_matrix/client/v3/rooms/${enc(roomId)}/send/m.room.message/${enc(txnId)}`,
-        { body: { msgtype: "m.text", body } },
-      );
-    },
-
-    /** Newest-first room timeline. @returns {{ chunk: object[] }} */
-    messages(roomId, limit = 20) {
-      return client.request(
-        "GET",
-        `/_matrix/client/v3/rooms/${enc(roomId)}/messages?dir=b&limit=${limit}`,
-      );
-    },
-
-    /** @returns {object|null} Profile, or null if the user does not exist. */
-    async getProfile(userId) {
-      try {
-        return await client.request("GET", `/_matrix/client/v3/profile/${enc(userId)}`);
-      } catch (err) {
-        if (err instanceof MatrixError && (err.status === 404 || err.errcode === "M_NOT_FOUND")) return null;
-        throw err;
-      }
-    },
-
     // --- Media -----------------------------------------------------------
 
     /** @returns {{ content_uri: string }} */

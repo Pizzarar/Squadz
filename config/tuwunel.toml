@@ -22,8 +22,8 @@ allow_registration = true
 # Overridden at runtime by TUWUNEL_REGISTRATION_TOKEN=${TUWUNEL_REGISTRATION_TOKEN}
 registration_token = "replace_via_env"
 
-# New registrants auto-join the Space and its rooms (Tuwunel src/api/client/register.rs,
-# option documented in tuwunel-example.toml). Rooms must already exist and be joined by the
+# New registrants auto-join the Space and its rooms (Tuwunel src/service/users/register.rs,
+# option defined in src/core/config/mod.rs, documented in tuwunel-example.toml). Rooms must already exist and be joined by the
 # server (run scripts/bootstrap.mjs once) and be joinable: the Space is public, the child
 # rooms are restricted to Space members. Overridden at runtime by TUWUNEL_AUTO_JOIN_ROOMS
 # in docker-compose.yml so the aliases follow CHAT_FQDN. Space first, then children.

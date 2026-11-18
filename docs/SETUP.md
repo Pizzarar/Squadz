@@ -115,7 +115,7 @@ Fill in `.env` with your real values:
 - `SOUNDBOARD_MATRIX_USER=soundboard`
 - `SOUNDBOARD_MATRIX_PASSWORD=<BOT_PASSWORD>`
 
-### 4.2 Validate Statically and Run Doctor and Run Doctor
+### 4.2 Validate Statically and Run Doctor
 Before booting, run the zero-dependency static validator (requires Node 20+):
 ```bash
 node scripts/validate.mjs

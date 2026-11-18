@@ -358,6 +358,12 @@ export function withUserLevel(content, userId, level) {
   return next;
 }
 
+/** Pure: true if some user would still have an effective power level >= `minLevel`. */
+export function hasUserAtLevel(content, minLevel) {
+  if (Number(content?.users_default) >= minLevel) return true;
+  return Object.values(content?.users ?? {}).some((v) => Number(v) >= minLevel);
+}
+
 /**
  * Set a user's role in the Space and every seeded room. Idempotent: rooms
  * already at the right level are not written.
@@ -379,6 +385,9 @@ export async function setRole(client, config, userArg, role, { force = false } =
     const current = await client.getState(roomId, "m.room.power_levels", "");
     const next = withUserLevel(current, userId, level);
     if (current && isDeepStrictEqual(current, next)) { out.unchanged.push(alias); continue; }
+    if (!hasUserAtLevel(next, 100)) {
+      throw new Error(`refusing to demote ${userId}: no user would remain at power level >= 100 in ${alias}`);
+    }
     await client.putState(roomId, "m.room.power_levels", "", next);
     out.changed.push(alias);
   }

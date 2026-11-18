@@ -68,7 +68,7 @@ jobs:
         run: |
           $COMPOSE up -d --no-deps --build caddy
           for i in $(seq 1 60); do
-            if $COMPOSE cp caddy:/data/caddy/pki/authorities/local/root.crt .e2e/root.crt 2>/dev/null; then
+            if $COMPOSE cp caddy:/data/caddy/pki/authorities/local/root.crt .e2e/root.crt 2>/dev/null && test -s .e2e/root.crt; then
               break
             fi
             sleep 2

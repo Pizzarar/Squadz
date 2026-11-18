@@ -71,13 +71,22 @@ function run(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { cwd: root, encoding: "utf8", ...opts });
 }
 
-function must(cmd, args, what) {
-  const r = run(cmd, args, { stdio: "inherit" });
+function mustWith(runFn, cmd, args, what) {
+  const r = runFn(cmd, args, { stdio: "inherit" });
   if (r.error || r.status !== 0) throw new Error(`${what ?? `${cmd} ${args.join(" ")}`} failed${r.error ? `: ${r.error.message}` : ` (exit ${r.status})`}`);
 }
 
+function must(cmd, args, what) {
+  return mustWith(run, cmd, args, what);
+}
+
+/** Resolve the .env path a command should read/write: `--env-file` or the default `./.env`. */
+function resolveEnvFile(flags) {
+  return flags["env-file"] ?? envPath;
+}
+
 function loadEnv(flags) {
-  const file = flags["env-file"] ?? envPath;
+  const file = resolveEnvFile(flags);
   if (!fs.existsSync(file)) throw new Error(`${file} not found. Run: node scripts/squadz.mjs setup`);
   loadEnvFile(file);
   return file;
@@ -110,8 +119,9 @@ function detectMeshIp() {
 }
 
 async function cmdSetup(flags) {
-  if (fs.existsSync(envPath) && !flags.force) {
-    throw new Error(`${envPath} already exists. Re-run with --force to overwrite it (this generates NEW secrets and invalidates the old ones).`);
+  const envFile = resolveEnvFile(flags);
+  if (fs.existsSync(envFile) && !flags.force) {
+    throw new Error(`${envFile} already exists. Re-run with --force to overwrite it (this generates NEW secrets and invalidates the old ones).`);
   }
   const interactive = process.stdin.isTTY && !flags.yes;
   const rl = interactive ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
@@ -136,9 +146,10 @@ async function cmdSetup(flags) {
     const secrets = generateSecrets();
     const values = buildEnvValues({ domain, cloudflareToken, meshIp, email, adminUser, secrets });
     const template = fs.readFileSync(path.join(root, ".env.example"), "utf8");
-    fs.writeFileSync(envPath, renderEnv(template, values), { mode: 0o600 });
+    fs.writeFileSync(envFile, renderEnv(template, values), { mode: 0o600 });
+    fs.chmodSync(envFile, 0o600);
 
-    console.log(`\nWrote ${envPath} (mode 600). Secrets were generated and are stored only there.`);
+    console.log(`\nWrote ${envFile} (mode 600). Secrets were generated and are stored only there.`);
     console.log(`\nCopy this now; it is the only time it is printed (also readable in .env):`);
     for (const k of COPY_ONCE) console.log(`  ${k}=${secrets[k]}`);
     console.log(`\nNext:`);
@@ -254,45 +265,53 @@ async function cmdSyncMembers(flags) {
 
 const HELPER_IMAGE = "alpine:3.20";
 
-function composeVolume(name) {
-  const cfg = run("docker", ["compose", "config", "--format", "json"]);
+function composeVolume(runFn, name) {
+  const cfg = runFn("docker", ["compose", "config", "--format", "json"]);
   const project = cfg.status === 0 ? JSON.parse(cfg.stdout).name : null;
   const args = ["volume", "ls", "-q", "--filter", `label=com.docker.compose.volume=${name}`];
   if (project) args.push("--filter", `label=com.docker.compose.project=${project}`);
-  const out = run("docker", args).stdout.trim().split(/\r?\n/).filter(Boolean);
+  const out = runFn("docker", args).stdout.trim().split(/\r?\n/).filter(Boolean);
   if (!out.length) throw new Error(`docker volume for "${name}" not found. Has the stack ever been started?`);
   return out[0];
 }
 
-function tuwunelRunning() {
-  const r = run("docker", ["compose", "ps", "--status", "running", "-q", "tuwunel"]);
+function tuwunelRunning(runFn) {
+  const r = runFn("docker", ["compose", "ps", "--status", "running", "-q", "tuwunel"]);
   return r.status === 0 && r.stdout.trim().length > 0;
 }
 
-function cmdBackup(flags) {
-  loadEnv(flags);
+export function cmdBackup(flags, deps = {}) {
+  const runFn = deps.run ?? run;
+  const mustFn = (cmd, args, what) => mustWith(runFn, cmd, args, what);
+  const envFile = deps.envFile ?? loadEnv(flags);
   const outDir = path.resolve(root, flags.out ?? "backups");
   fs.mkdirSync(outDir, { recursive: true });
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), "squadz-backup-"));
-  const volume = composeVolume("tuwunel_data");
-  const wasRunning = tuwunelRunning();
   try {
-    if (wasRunning) must("docker", ["compose", "stop", "tuwunel"], "stopping tuwunel");
-    must("docker", ["run", "--rm", "-v", `${volume}:/data:ro`, "-v", `${stage}:/out`, HELPER_IMAGE, "tar", "czf", "/out/tuwunel-data.tar.gz", "-C", "/data", "."], "snapshotting the tuwunel volume");
+    const volume = composeVolume(runFn, "tuwunel_data");
+    const wasRunning = tuwunelRunning(runFn);
+    try {
+      if (wasRunning) mustFn("docker", ["compose", "stop", "tuwunel"], "stopping tuwunel");
+      mustFn("docker", ["run", "--rm", "-v", `${volume}:/data:ro`, "-v", `${stage}:/out`, HELPER_IMAGE, "tar", "czf", "/out/tuwunel-data.tar.gz", "-C", "/data", "."], "snapshotting the tuwunel volume");
+    } finally {
+      if (wasRunning) mustFn("docker", ["compose", "start", "tuwunel"], "restarting tuwunel");
+    }
+    fs.copyFileSync(envFile, path.join(stage, "env"));
+    fs.cpSync(path.join(root, "config"), path.join(stage, "config"), { recursive: true });
+    fs.writeFileSync(path.join(stage, "manifest.json"), JSON.stringify({ created: new Date().toISOString(), volume, tuwunel: "see docker-compose.yml" }, null, 2));
+    const file = path.join(outDir, backupFileName());
+    mustFn("tar", ["czf", file, "-C", stage, "."], "creating the archive");
+    fs.chmodSync(file, 0o600);
+    console.log(`Backup written: ${file}\nIt contains .env (secrets): store it somewhere private.`);
   } finally {
-    if (wasRunning) must("docker", ["compose", "start", "tuwunel"], "restarting tuwunel");
+    fs.rmSync(stage, { recursive: true, force: true });
   }
-  fs.copyFileSync(envPath, path.join(stage, "env"));
-  fs.cpSync(path.join(root, "config"), path.join(stage, "config"), { recursive: true });
-  fs.writeFileSync(path.join(stage, "manifest.json"), JSON.stringify({ created: new Date().toISOString(), volume, tuwunel: "see docker-compose.yml" }, null, 2));
-  const file = path.join(outDir, backupFileName());
-  must("tar", ["czf", file, "-C", stage, "."], "creating the archive");
-  fs.chmodSync(file, 0o600);
-  fs.rmSync(stage, { recursive: true, force: true });
-  console.log(`Backup written: ${file}\nIt contains .env (secrets): store it somewhere private.`);
 }
 
-function cmdRestore(flags, pos) {
+export function cmdRestore(flags, pos, deps = {}) {
+  const runFn = deps.run ?? run;
+  const mustFn = (cmd, args, what) => mustWith(runFn, cmd, args, what);
+  const envFile = deps.envFile ?? resolveEnvFile(flags);
   const file = pos[0];
   if (!file) throw new Error("usage: restore <file.tar.gz> --yes [--with-config]");
   if (!flags.yes) throw new Error("restore replaces the live Tuwunel database. Re-run with --yes to confirm.");
@@ -300,17 +319,18 @@ function cmdRestore(flags, pos) {
   if (!fs.existsSync(archive)) throw new Error(`${archive} not found`);
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), "squadz-restore-"));
   try {
-    must("tar", ["xzf", archive, "-C", stage], "extracting the archive");
+    mustFn("tar", ["xzf", archive, "-C", stage], "extracting the archive");
     if (!fs.existsSync(path.join(stage, "tuwunel-data.tar.gz"))) throw new Error("not a squadz backup (tuwunel-data.tar.gz missing)");
     if (flags["with-config"]) {
-      fs.copyFileSync(path.join(stage, "env"), envPath);
+      fs.copyFileSync(path.join(stage, "env"), envFile);
+      fs.chmodSync(envFile, 0o600);
       fs.cpSync(path.join(stage, "config"), path.join(root, "config"), { recursive: true });
       console.log("Restored .env and config/.");
     }
-    const volume = composeVolume("tuwunel_data");
-    run("docker", ["compose", "stop", "tuwunel"], { stdio: "inherit" });
-    must("docker", ["run", "--rm", "-v", `${volume}:/data`, "-v", `${stage}:/in:ro`, HELPER_IMAGE, "sh", "-c", "find /data -mindepth 1 -delete && tar xzf /in/tuwunel-data.tar.gz -C /data"], "restoring the volume");
-    must("docker", ["compose", "up", "-d", "tuwunel"], "starting tuwunel");
+    const volume = composeVolume(runFn, "tuwunel_data");
+    mustFn("docker", ["compose", "stop", "tuwunel"], "stopping tuwunel");
+    mustFn("docker", ["run", "--rm", "-v", `${volume}:/data`, "-v", `${stage}:/in:ro`, HELPER_IMAGE, "sh", "-c", "find /data -mindepth 1 -delete && tar xzf /in/tuwunel-data.tar.gz -C /data"], "restoring the volume");
+    mustFn("docker", ["compose", "up", "-d", "tuwunel"], "starting tuwunel");
     console.log("Restored. Run: node scripts/squadz.mjs doctor");
   } finally {
     fs.rmSync(stage, { recursive: true, force: true });
@@ -336,7 +356,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`squadz: ${err.message}\n`);
-  process.exit(1);
-});
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((err) => {
+    process.stderr.write(`squadz: ${err.message}\n`);
+    process.exit(1);
+  });
+}
