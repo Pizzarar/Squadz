@@ -305,11 +305,19 @@ export class SoundboardBot {
       await saveClipAtomic(this.clips.clipsDir, cmd.clip, data, fmt.ext, {
         replace: cmd.replace,
         validate: async (tmpPath) => {
-          const signal = AbortSignal.any([
-            this._shutdownController.signal,
-            AbortSignal.timeout(this.addDecodeTimeoutMs),
-          ]);
-          const pcm = await this.decodeClip(tmpPath, { signal, maxBytes: MAX_UPLOAD_PCM_BYTES });
+          // A ref'd timer (AbortSignal.timeout() is unref'd and would not keep the event loop
+          // alive), cleared as soon as the decode settles.
+          const timeout = new AbortController();
+          const timer = setTimeout(() => timeout.abort(), this.addDecodeTimeoutMs);
+          let pcm;
+          try {
+            pcm = await this.decodeClip(tmpPath, {
+              signal: AbortSignal.any([this._shutdownController.signal, timeout.signal]),
+              maxBytes: MAX_UPLOAD_PCM_BYTES,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
           if (!pcm || pcm.length === 0) throw userError('the audio could not be decoded or is empty.');
           seconds = pcm.length / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE);
           if (seconds > MAX_CLIP_SECONDS) {
