@@ -109,6 +109,9 @@ jobs:
       - name: "E2E 2d - Tuwunel POSTs /_matrix/push/v1/notify to a mock push gateway"
         run: node scripts/e2e/2d-push.mjs
 
+      - name: "E2E 2e - search + threads (/search, /relations, /threads)"
+        run: node scripts/e2e/2e-search.mjs
+
       - name: "E2E 3 - OpenID -> lk-jwt-service /sfu/get -> LiveKit join"
         run: node scripts/e2e/3-rtc.mjs
 
