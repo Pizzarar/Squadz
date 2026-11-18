@@ -1,7 +1,7 @@
 # Squadz · Deploy runbook (zero to running)
 
 Written for Aub: an Ubuntu box, a Tailscale account, a domain on Cloudflare. About 30 minutes.
-Everything operational goes through one tool: `node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|backup|restore|update>`
+Everything operational goes through one tool: `node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|backup|restore|service|update>`
 (`node scripts/squadz.mjs --help`). Background and troubleshooting live in [SETUP.md](SETUP.md).
 
 ## 0. What you need
@@ -140,7 +140,19 @@ node scripts/squadz.mjs backup        # backups/squadz-backup-YYYYMMDD-HHMMSS.ta
 node scripts/squadz.mjs restore backups/<file>.tar.gz --yes [--with-config]
 ```
 
-`backup` briefly stops Tuwunel (a few seconds), tars the RocksDB volume and copies `.env` and `config/` into one archive (mode 600, **contains secrets**: keep it off shared storage). Tuwunel also has an online backup (`!admin server backup-database`, needs `database_backup_path`), but a stopped-volume tar restores by plain untar and needs no extra config. `restore` replaces the live DB, so it needs `--yes`; `--with-config` also restores `.env` and `config/`. Cron it nightly: `0 4 * * * cd /path/to/squadz && node scripts/squadz.mjs backup`.
+`backup` briefly stops Tuwunel (a few seconds), tars the RocksDB volume and copies `.env` and `config/` into one archive (mode 600, **contains secrets**: keep it off shared storage). Tuwunel also has an online backup (`!admin server backup-database`, needs `database_backup_path`), but a stopped-volume tar restores by plain untar and needs no extra config. `restore` replaces the live DB, so it needs `--yes`; `--with-config` also restores `.env` and `config/`. `backup --keep N` (default 14) then deletes the oldest `squadz-backup-*.tar.gz` beyond N (nothing else in `backups/` is touched).
+
+**Stay up across reboots + nightly backup** (Linux host with systemd):
+
+```bash
+node scripts/squadz.mjs service install --dry-run   # print the units, touch nothing
+node scripts/squadz.mjs service install             # uses sudo unless root; safe to re-run
+node scripts/squadz.mjs service install --backup-at 03:30 --keep 7   # change the schedule
+node scripts/squadz.mjs service status
+node scripts/squadz.mjs service uninstall
+```
+
+This writes `squadz.service` (oneshot, `docker compose up -d` after `docker.service` + network-online, enabled at boot) and `squadz-backup.service` + `squadz-backup.timer` (nightly `backup`, default 04:00, `Persistent=true` so a missed run fires at next boot). Every compose service is `restart: unless-stopped` (enforced by `scripts/validate.mjs`). `doctor` warns if the service is not enabled or the newest backup is older than 48h.
 
 ### Custom emoji & stickers
 

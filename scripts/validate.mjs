@@ -271,6 +271,22 @@ check('Compose defines all required contract services', () => {
   return `Services: ${actual.join(', ')}`;
 });
 
+// 4b. Every service restarts on boot/crash (the systemd unit relies on this)
+check('Every compose service has restart: unless-stopped', () => {
+  const lines = composeContent.split('\n').map((l) => l.trimEnd());
+  const bad = [];
+  for (const name of Object.keys(compose.services)) {
+    const start = lines.indexOf('  ' + name + ':');
+    let found = false;
+    for (let i = start + 1; i < lines.length && !/^ {0,2}\S/.test(lines[i]); i++) {
+      if (/^ {4}restart:\s*unless-stopped$/.test(lines[i])) found = true;
+    }
+    if (!found) bad.push(name);
+  }
+  assert(bad.length === 0, 'Missing restart: unless-stopped on: ' + bad.join(', '));
+  return Object.keys(compose.services).length + ' services';
+});
+
 // 5. Image tags pinned (no :latest)
 check('All service images and caddy/Dockerfile FROM tags are pinned (no :latest)', () => {
   const checkedImages = [];

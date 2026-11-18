@@ -210,17 +210,20 @@ export async function runDoctor(env, io, now = new Date()) {
   results.push(checkVersions(await safe(() => io.getJson(`https://${chat}/_matrix/client/versions`), null)));
   results.push(checkJwtHealth(rtc, await safe(() => io.getStatus(`https://${rtc}/livekit/jwt/healthz`), 0)));
   results.push(checkContainers(await safe(async () => parseComposePs(await io.composePs()), [])));
+  if (io.serviceState) results.push(checkServiceEnabled(await safe(() => io.serviceState(), null)));
+  if (io.backupFiles) results.push(checkBackupFreshness(await safe(() => io.backupFiles(), []), now));
   return results;
 }
 
 export function formatDoctor(results) {
   const lines = [];
   for (const r of results) {
-    lines.push(`${r.ok ? "OK  " : "FAIL"} ${r.name}${r.detail ? ` — ${r.detail}` : ""}`);
-    if (!r.ok && r.fix) lines.push(`     fix: ${r.fix}`);
+    lines.push(`${r.warn ? "WARN" : r.ok ? "OK  " : "FAIL"} ${r.name}${r.detail ? ` — ${r.detail}` : ""}`);
+    if ((!r.ok || r.warn) && r.fix) lines.push(`     fix: ${r.fix}`);
   }
   const bad = results.filter((r) => !r.ok).length;
-  lines.push("", bad ? `${bad} of ${results.length} checks failed.` : `All ${results.length} checks passed.`);
+  const warns = results.filter((r) => r.ok && r.warn).length;
+  lines.push("", bad ? `${bad} of ${results.length} checks failed.` : `All ${results.length} checks passed${warns ? ` (${warns} warning${warns > 1 ? "s" : ""})` : ""}.`);
   lines.push("UDP 50000-50100 cannot be probed from here; test a real call (docs/DEPLOY.md, on-device checks).");
   return lines.join("\n");
 }
@@ -432,4 +435,117 @@ export async function syncMembers(client, config, users, log = () => {}) {
 export function backupFileName(date = new Date()) {
   const p = date.toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
   return `squadz-backup-${p}.tar.gz`;
+}
+
+// ---------------------------------------------------------------------------
+// backup retention + systemd units (`squadz service`)
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_KEEP = 14;
+const BACKUP_RE = /^squadz-backup-\d{8}-\d{6}\.tar\.gz$/;
+
+export function isBackupFile(name) {
+  return BACKUP_RE.test(name);
+}
+
+/** Parse --keep: a positive integer, default 14. */
+export function parseKeep(v) {
+  if (v === undefined || v === true) return DEFAULT_KEEP;
+  if (!/^\d+$/.test(String(v)) || Number(v) < 1) throw new Error(`--keep must be a positive integer, got "${v}"`);
+  return Number(v);
+}
+
+/**
+ * Which backups to delete: only exact `squadz-backup-YYYYMMDD-HHMMSS.tar.gz`
+ * names; the oldest beyond `keep` (names sort chronologically).
+ */
+export function selectBackupsToPrune(names, keep = DEFAULT_KEEP) {
+  const mine = names.filter(isBackupFile).sort();
+  return mine.length > keep ? mine.slice(0, mine.length - keep) : [];
+}
+
+/** Parse HH:MM (24h) -> "HH:MM" zero-padded, or throw. */
+export function parseBackupTime(v = "04:00") {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v));
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) throw new Error(`--backup-at must be HH:MM (24h), got "${v}"`);
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+/** systemd ExecStart tokens need quoting if they hold spaces. */
+const q = (s) => (/[\s"\\]/.test(s) ? `"${s.replace(/(["\\])/g, "\\$1")}"` : s);
+
+/**
+ * Pure: the systemd unit files.
+ * @param {{repoDir:string, nodePath:string, dockerPath?:string, backupAt?:string, keep?:number}} o
+ * @returns {Record<string,string>} file name -> contents
+ */
+export function buildServiceUnits({ repoDir, nodePath, dockerPath = "/usr/bin/docker", backupAt = "04:00", keep = DEFAULT_KEEP }) {
+  const at = parseBackupTime(backupAt);
+  const script = `${repoDir}/scripts/squadz.mjs`;
+  return {
+    "squadz.service": `[Unit]
+Description=Squadz stack (docker compose up -d)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=${repoDir}
+ExecStart=${q(dockerPath)} compose up -d
+ExecStop=${q(dockerPath)} compose stop
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+`,
+    "squadz-backup.service": `[Unit]
+Description=Squadz nightly backup
+After=docker.service squadz.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=${repoDir}
+ExecStart=${q(nodePath)} ${q(script)} backup --keep ${keep}
+`,
+    "squadz-backup.timer": `[Unit]
+Description=Squadz nightly backup at ${at}
+
+[Timer]
+OnCalendar=*-*-* ${at}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`,
+  };
+}
+
+/**
+ * Doctor check: warn (never fail) when the squadz.service is not enabled.
+ * @param {string|null} state `systemctl is-enabled squadz.service` stdout, null = unknown (no systemd)
+ */
+export function checkServiceEnabled(state) {
+  const label = "squadz.service enabled at boot";
+  if (state === null || state === undefined) return { name: label, ok: true, warn: true, detail: "systemd not available here, skipped" };
+  return String(state).trim() === "enabled"
+    ? ok(label, "enabled")
+    : { name: label, ok: true, warn: true, detail: `state: ${String(state).trim() || "not installed"}`, fix: "sudo node scripts/squadz.mjs service install (the stack will not come back after a reboot otherwise)." };
+}
+
+/**
+ * Doctor check: warn (never fail) if the newest backup is older than 48h or absent.
+ * @param {{name:string, mtimeMs:number}[]} files directory entries of backups/
+ */
+export function checkBackupFreshness(files, now = new Date(), maxAgeHours = 48) {
+  const label = "recent backup";
+  const mine = files.filter((f) => isBackupFile(f.name));
+  const fix = "node scripts/squadz.mjs backup, or `squadz service install` for a nightly timer.";
+  if (!mine.length) return { name: label, ok: true, warn: true, detail: "no backups found", fix };
+  const newest = Math.max(...mine.map((f) => f.mtimeMs));
+  const hours = (now.getTime() - newest) / 3600000;
+  return hours > maxAgeHours
+    ? { name: label, ok: true, warn: true, detail: `newest backup is ${Math.floor(hours)}h old (limit ${maxAgeHours}h)`, fix }
+    : ok(label, `newest is ${Math.floor(Math.max(hours, 0))}h old`);
 }

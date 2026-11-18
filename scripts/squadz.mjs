@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/squadz.mjs: the one ops entry point for Squadz.
 //
-//   node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|emoji|server|backup|restore|update> [options]
+//   node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|emoji|server|backup|restore|service|update> [options]
 //
 // Reuses scripts/lib (config, matrix, seed) and scripts/bootstrap.mjs; the
 // testable logic lives in scripts/lib/ops.mjs. Node 20+, no dependencies.
@@ -23,7 +23,7 @@ import { addEmoji, listEmoji, removeEmoji } from "./lib/emoji.mjs";
 import {
   COPY_ONCE, buildEnvValues, buildInviteMessage, generateSecrets, listUsers, obtainToken,
   parseMeshIp, renderEnv, runDoctor, formatDoctor, setRole, syncMembers, validateSetupInputs,
-  ROLE_LEVELS, backupFileName,
+  ROLE_LEVELS, backupFileName, buildServiceUnits, parseBackupTime, parseKeep, selectBackupsToPrune,
 } from "./lib/ops.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -54,9 +54,15 @@ Usage: node scripts/squadz.mjs <command> [options]
         its avatar (png/jpg/webp, max 2MB; --icon-all also applies it to every room);
         --topic sets a room topic (repeatable, e.g. --topic general="Chat here");
         --welcome posts the markdown as a notice in #general and pins it, replacing the old pin.
-  backup [--out DIR]           Cold snapshot of the Tuwunel DB + .env + config into a dated tar.gz.
+  backup [--out DIR] [--keep N]
+                               Cold snapshot of the Tuwunel DB + .env + config into a dated tar.gz.
+                               Then prunes squadz-backup-*.tar.gz beyond the newest N (default 14).
   restore <file> --yes [--with-config]
                                Restore a backup (stops tuwunel, replaces the DB volume).
+  service <install|uninstall|status> [--backup-at HH:MM] [--keep N] [--dry-run]
+                               systemd: start the stack at boot + nightly backup (default 04:00,
+                               keep 14). Linux + systemd only; install/uninstall need root (uses sudo).
+                               --dry-run prints the units and touches nothing.
   update                       docker compose pull, recreate, then doctor.
 
 Global: --env-file <path> (default ./.env)  -h, --help
@@ -67,7 +73,7 @@ Global: --env-file <path> (default ./.env)  -h, --help
 export function parseArgs(argv) {
   const flags = {};
   const pos = [];
-  const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "env-file", "icon", "welcome"]);
+  const valued = new Set(["domain", "cloudflare-token", "mesh-ip", "email", "admin-user", "name", "mesh-invite", "out", "keep", "backup-at", "env-file", "icon", "welcome"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h") flags.help = true;
@@ -208,6 +214,15 @@ function realIo(env) {
       return r.ok ? r.json() : null;
     },
     getStatus: async (url) => (await fetch(url, { signal: AbortSignal.timeout(8000) })).status,
+    serviceState: () => {
+      if (!hasSystemd()) return null;
+      return run("systemctl", ["is-enabled", "squadz.service"]).stdout.trim();
+    },
+    backupFiles: () => {
+      const dir = path.join(root, "backups");
+      if (!fs.existsSync(dir)) return [];
+      return fs.readdirSync(dir).map((name) => ({ name, mtimeMs: fs.statSync(path.join(dir, name)).mtimeMs }));
+    },
     composePs: () => {
       const r = run("docker", ["compose", "ps", "--format", "json"]);
       if (r.error || r.status !== 0) throw new Error(r.error?.message ?? r.stderr);
@@ -362,10 +377,18 @@ function tuwunelRunning(runFn) {
   return r.status === 0 && r.stdout.trim().length > 0;
 }
 
+/** Delete the oldest exact-pattern backups beyond `keep`; returns the removed names. */
+export function pruneBackups(dir, keep) {
+  const doomed = selectBackupsToPrune(fs.readdirSync(dir), keep);
+  for (const name of doomed) fs.rmSync(path.join(dir, name), { force: true });
+  return doomed;
+}
+
 export function cmdBackup(flags, deps = {}) {
   const runFn = deps.run ?? run;
   const mustFn = (cmd, args, what) => mustWith(runFn, cmd, args, what);
   const envFile = deps.envFile ?? loadEnv(flags);
+  const keep = parseKeep(flags.keep);
   const outDir = path.resolve(root, flags.out ?? "backups");
   fs.mkdirSync(outDir, { recursive: true });
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), "squadz-backup-"));
@@ -385,6 +408,7 @@ export function cmdBackup(flags, deps = {}) {
     mustFn("tar", ["czf", file, "-C", stage, "."], "creating the archive");
     fs.chmodSync(file, 0o600);
     console.log(`Backup written: ${file}\nIt contains .env (secrets): store it somewhere private.`);
+    for (const name of pruneBackups(outDir, keep)) console.log(`Pruned old backup: ${name}`);
   } finally {
     fs.rmSync(stage, { recursive: true, force: true });
   }
@@ -420,6 +444,78 @@ export function cmdRestore(flags, pos, deps = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// service (systemd units: stack at boot + nightly backup)
+
+const UNIT_DIR = "/etc/systemd/system";
+const UNIT_FILES = ["squadz.service", "squadz-backup.service", "squadz-backup.timer"];
+
+function hasSystemd() {
+  return process.platform === "linux" && fs.existsSync("/run/systemd/system");
+}
+
+export function cmdService(flags, pos, deps = {}) {
+  const action = pos[0];
+  if (!["install", "uninstall", "status"].includes(action)) throw new Error("usage: service <install|uninstall|status> [--backup-at HH:MM] [--keep N] [--dry-run]");
+  const runFn = deps.run ?? run;
+  const platform = deps.platform ?? process.platform;
+  const systemd = deps.systemd ?? hasSystemd();
+  const unitDir = deps.unitDir ?? UNIT_DIR;
+  const isRoot = deps.isRoot ?? (typeof process.getuid === "function" && process.getuid() === 0);
+  const log = deps.log ?? console.log;
+  const dryRun = !!flags["dry-run"];
+  const units = buildServiceUnits({
+    repoDir: deps.repoDir ?? root,
+    nodePath: deps.nodePath ?? process.execPath,
+    dockerPath: deps.dockerPath ?? "/usr/bin/docker",
+    backupAt: parseBackupTime(flags["backup-at"]),
+    keep: parseKeep(flags.keep),
+  });
+  if (dryRun) {
+    if (action === "install") {
+      for (const [n, text] of Object.entries(units)) log(`# ${unitDir}/${n}
+${text}`);
+      log("--dry-run: nothing written, nothing enabled.");
+    } else log(`--dry-run: would ${action} ${UNIT_FILES.join(", ")} in ${unitDir}; nothing touched.`);
+    return;
+  }
+  if (platform !== "linux") throw new Error(`squadz service needs Linux with systemd (this is ${platform}). Run it on the Ubuntu host, or use --dry-run to preview the units.`);
+  if (!systemd) throw new Error("systemd is not running here (/run/systemd/system missing); cannot manage units. Use --dry-run to preview the units.");
+  const priv = (cmd, args, what) => (isRoot ? mustWith(runFn, cmd, args, what) : mustWith(runFn, "sudo", [cmd, ...args], what));
+  if (action === "status") {
+    for (const u of ["squadz.service", "squadz-backup.timer"]) {
+      log(`${u}: enabled=${runFn("systemctl", ["is-enabled", u]).stdout?.trim() || "no"} active=${runFn("systemctl", ["is-active", u]).stdout?.trim() || "no"}`);
+    }
+    return;
+  }
+  log(`Will ${action} ${UNIT_FILES.join(", ")} in ${unitDir}${isRoot ? "" : " (via sudo)"}.`);
+  if (action === "install") {
+    for (const [n, text] of Object.entries(units)) {
+      const target = path.join(unitDir, n);
+      if (fs.existsSync(target) && fs.readFileSync(target, "utf8") === text) { log(`unchanged: ${n}`); continue; }
+      const tmp = path.join(os.tmpdir(), `${n}.${process.pid}`);
+      fs.writeFileSync(tmp, text);
+      try { priv("install", ["-m", "644", tmp, target], `writing ${n}`); } finally { fs.rmSync(tmp, { force: true }); }
+      log(`wrote: ${n}`);
+    }
+    priv("systemctl", ["daemon-reload"], "systemctl daemon-reload");
+    priv("systemctl", ["enable", "squadz.service", "squadz-backup.timer"], "enabling units");
+    priv("systemctl", ["start", "squadz-backup.timer"], "starting the backup timer");
+    log("Installed. squadz.service starts the stack at boot; the backup timer is armed. Check: node scripts/squadz.mjs service status");
+  } else {
+    // disable fails harmlessly if the units were never installed
+    runFn(...(isRoot ? ["systemctl", ["disable", "--now", "squadz-backup.timer", "squadz.service"]] : ["sudo", ["systemctl", "disable", "--now", "squadz-backup.timer", "squadz.service"]]), { stdio: "inherit" });
+    for (const n of UNIT_FILES) {
+      const target = path.join(unitDir, n);
+      if (!fs.existsSync(target)) continue;
+      priv("rm", ["-f", target], `removing ${n}`);
+      log(`removed: ${n}`);
+    }
+    priv("systemctl", ["daemon-reload"], "systemctl daemon-reload");
+    log("Uninstalled. The compose stack itself is left running.");
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -435,6 +531,7 @@ async function main() {
     case "server": return cmdServer(flags, pos);
     case "backup": return cmdBackup(flags);
     case "restore": return cmdRestore(flags, pos);
+    case "service": return cmdService(flags, pos);
     case "update": return process.exit(await cmdUpdate(flags));
     default: throw new Error(`unknown command "${cmd}"\n\n${USAGE}`);
   }
