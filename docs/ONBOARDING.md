@@ -5,6 +5,8 @@ on a server that is only reachable over the group's private mesh, so you join th
 mesh first, then sign up. This guide covers **Element X** (iPhone/Android) and
 **Element** (desktop).
 
+> **Host (Aub):** `node scripts/squadz.mjs invite --name <FRIEND>` prints a ready-to-paste version of this guide with a single-use token; the full deploy runbook is [DEPLOY.md](DEPLOY.md). The rest of this page is the friend-facing reference.
+
 > Replace `<YOUR_DOMAIN>` and `<REGISTRATION_TOKEN>` below with the real values
 > from the host (they live in the server's `.env`, never in this repo).
 
@@ -13,18 +15,18 @@ mesh first, then sign up. This guide covers **Element X** (iPhone/Android) and
 Ask Aub (the server owner) for three things:
 
 1. **Server name** — this is the chat address, `chat.<YOUR_DOMAIN>`.
-2. **Mesh invite** — an invite link/code for NordVPN Meshnet or Tailscale (step 1).
-3. **Registration token** — the `<REGISTRATION_TOKEN>` you use to create your account.
+2. **Mesh invite** — a Tailscale invite link (step 1; NordVPN Meshnet if the host uses it instead).
+3. **Registration token** — the `<REGISTRATION_TOKEN>` you use to create your account (single-use, so it only works for you).
 
 ## 1. Join the mesh
 
 The server is not on the public internet. Your device must be on the same
 peer-to-peer mesh before Element can reach it.
 
-**NordVPN Meshnet** (or **Tailscale**, whichever the host uses):
+**Tailscale** (default; NordVPN Meshnet works the same way if the host uses it):
 
-1. Install the app and sign in.
-2. Accept the host's invite and enable mesh traffic routing on the device.
+1. Install Tailscale (https://tailscale.com/download) and sign in.
+2. Accept the host's tailnet invite (or machine share) and switch the VPN on. For Meshnet: install NordVPN, accept the invite and enable mesh routing.
 3. Check you can see the host's mesh device as "connected".
 
 > On desktop, make sure the mesh app stays running (and "allow LAN/mesh traffic"
@@ -41,7 +43,7 @@ peer-to-peer mesh before Element can reach it.
 2. When asked for a server, choose **Edit / Other** and enter the server name
    `chat.<YOUR_DOMAIN>` (or enter your full ID as `@<your-name>:chat.<YOUR_DOMAIN>`
    and let it auto-discover).
-3. Choose a username and a strong password.
+3. Choose your own username and a strong password.
 4. When prompted for a **registration token**, paste `<REGISTRATION_TOKEN>`.
 5. Verify your session (Element X will set up encryption keys — keep your recovery
    key/passphrase somewhere safe).
@@ -50,8 +52,8 @@ peer-to-peer mesh before Element can reach it.
 
 Once signed in:
 
-1. Tap the **invite** you received (or open **Spaces** / the `+` menu).
-2. Join **Squadz**. You'll see the rooms inside:
+1. You should land in **Squadz** automatically. If not, accept the Space invite or open **Spaces**, and ask the host to run `squadz sync-members`.
+2. Open **Squadz**. You'll see the rooms inside:
    - **General** — day-to-day chat
    - **Games** — game talk and scheduling
    - **Clips** — the soundboard bot (`!sb play <clip>`)
