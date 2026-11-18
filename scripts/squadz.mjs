@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/squadz.mjs: the one ops entry point for Squadz.
 //
-//   node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|backup|restore|update> [options]
+//   node scripts/squadz.mjs <setup|doctor|invite|role|sync-members|emoji|backup|restore|update> [options]
 //
 // Reuses scripts/lib (config, matrix, seed) and scripts/bootstrap.mjs; the
 // testable logic lives in scripts/lib/ops.mjs. Node 20+, no dependencies.
@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadEnvFile, resolveConfig } from "./lib/config.mjs";
 import { createMatrixClient } from "./lib/matrix.mjs";
+import { addEmoji, listEmoji, removeEmoji } from "./lib/emoji.mjs";
 import {
   COPY_ONCE, buildEnvValues, buildInviteMessage, generateSecrets, listUsers, obtainToken,
   parseMeshIp, renderEnv, runDoctor, formatDoctor, setRole, syncMembers, validateSetupInputs,
@@ -40,6 +41,12 @@ Usage: node scripts/squadz.mjs <command> [options]
         links the hosted web client (https://CHAT_FQDN/); --no-web omits it.
   role <user> owner|mod|member Set power level (100/50/0) in the Space and every room. Idempotent.
   sync-members                 Invite every local user to the Space (fallback if auto-join missed someone).
+  emoji add <shortcode> <image> [--sticker] [--emoji]
+        Add a custom emoji (default) or sticker (--sticker) to the Space + every text room.
+        Shortcode [a-z0-9_]{2,32}; png/gif/webp/jpg; max 256KB (emoji) / 512KB (sticker).
+        Re-adding a shortcode replaces it; other images are kept.
+  emoji remove <shortcode>     Remove an emoji/sticker from the pack everywhere.
+  emoji list                   List the pack (shortcode, usage, size).
   backup [--out DIR]           Cold snapshot of the Tuwunel DB + .env + config into a dated tar.gz.
   restore <file> --yes [--with-config]
                                Restore a backup (stops tuwunel, replaces the DB volume).
@@ -257,6 +264,30 @@ async function cmdSyncMembers(flags) {
   console.log(`invited ${r.invited.length} (${r.invited.join(", ") || "none"}); ${r.already.length} already in the Space.`);
 }
 
+async function cmdEmoji(flags, pos) {
+  const [sub, ...args] = pos;
+  if (!["add", "remove", "list"].includes(sub)) throw new Error("usage: emoji <add <shortcode> <image> [--sticker] [--emoji] | remove <shortcode> | list>");
+  if (sub === "add" && args.length !== 2) throw new Error("usage: emoji add <shortcode> <image-file> [--sticker] [--emoji]");
+  if (sub === "remove" && args.length !== 1) throw new Error("usage: emoji remove <shortcode>");
+  if (flags.sticker && flags.emoji) throw new Error("choose either --sticker or --emoji, not both");
+  loadEnv(flags);
+  const { client, config } = await adminClient();
+  if (sub === "add") {
+    const [shortcode, file] = args;
+    if (!fs.existsSync(file)) throw new Error(`${file} not found`);
+    const usage = flags.sticker ? "sticker" : "emoticon";
+    const r = await addEmoji(client, config, { shortcode, bytes: fs.readFileSync(file), filename: path.basename(file), usage });
+    console.log(`:${shortcode}: added as ${usage === "sticker" ? "sticker" : "emoji"} (${r.info.mimetype} ${r.info.w}x${r.info.h}, ${r.info.size} bytes); pack updated in ${r.changed.length}/${r.targets} room(s).`);
+  } else if (sub === "remove") {
+    const r = await removeEmoji(client, config, args[0]);
+    console.log(r.changed.length ? `:${args[0]}: removed from ${r.changed.length}/${r.targets} room(s).` : `:${args[0]}: not in the pack; nothing to do.`);
+  } else {
+    const items = await listEmoji(client, config);
+    if (!items.length) return console.log("The pack is empty.");
+    for (const i of items) console.log(`:${i.shortcode}:	${i.usage.join(",")}	${i.info ? `${i.info.w}x${i.info.h} ${i.info.size ?? "?"}B` : ""}	${i.url}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // backup / restore (cold: stop tuwunel, tar the volume, start it again)
 //
@@ -350,6 +381,7 @@ async function main() {
     case "invite": return cmdInvite(flags);
     case "role": return cmdRole(flags, pos);
     case "sync-members": return cmdSyncMembers(flags);
+    case "emoji": return cmdEmoji(flags, pos);
     case "backup": return cmdBackup(flags);
     case "restore": return cmdRestore(flags, pos);
     case "update": return process.exit(await cmdUpdate(flags));

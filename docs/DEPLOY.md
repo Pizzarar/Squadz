@@ -142,6 +142,19 @@ node scripts/squadz.mjs restore backups/<file>.tar.gz --yes [--with-config]
 
 `backup` briefly stops Tuwunel (a few seconds), tars the RocksDB volume and copies `.env` and `config/` into one archive (mode 600, **contains secrets**: keep it off shared storage). Tuwunel also has an online backup (`!admin server backup-database`, needs `database_backup_path`), but a stopped-volume tar restores by plain untar and needs no extra config. `restore` replaces the live DB, so it needs `--yes`; `--with-config` also restores `.env` and `config/`. Cron it nightly: `0 4 * * * cd /path/to/squadz && node scripts/squadz.mjs backup`.
 
+### Custom emoji & stickers
+
+Discord-style, owner-only (needs the admin account from `.env`):
+
+```bash
+node scripts/squadz.mjs emoji add party_parrot ./parrot.gif          # emoji (<= 256KB)
+node scripts/squadz.mjs emoji add cat_hello ./hello.webp --sticker   # sticker (<= 512KB)
+node scripts/squadz.mjs emoji list
+node scripts/squadz.mjs emoji remove party_parrot
+```
+
+Shortcodes are `[a-z0-9_]{2,32}`; files must be png, gif, webp or jpg. The image is uploaded once and added to the MSC2545 pack (`im.ponies.room_emotes`) on the Space and every text room, keeping the existing images; re-adding a shortcode replaces it. The picker updates live in Cinny; Element X may need a room reopen.
+
 ## Sources
 
 - Tuwunel v1.5.1: `auto_join_rooms` and `registration_token_file` in `tuwunel-example.toml`; auto-join in `src/service/users/register.rs`; `token issue [--once|--max-uses|--max-age]` in `src/admin/token/`; `users list-users` in `src/admin/user/commands.rs`; `server backup-database` in `src/admin/server/`; first user becomes admin in `src/service/users/register.rs`. <https://github.com/matrix-construct/tuwunel>

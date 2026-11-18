@@ -100,6 +100,9 @@ jobs:
       - name: "E2E 2 - real scripts/bootstrap.mjs twice (topology + idempotence)"
         run: node scripts/e2e/2-bootstrap.mjs
 
+      - name: "E2E 2b - squadz emoji add/list/remove against the live pack"
+        run: node scripts/e2e/2b-emoji.mjs
+
       - name: "E2E 3 - OpenID -> lk-jwt-service /sfu/get -> LiveKit join"
         run: node scripts/e2e/3-rtc.mjs
 
