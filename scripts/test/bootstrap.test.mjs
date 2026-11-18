@@ -132,7 +132,7 @@ test("child rooms use restricted join rules allowing Space membership", () => {
     assert.deepEqual(joinRules.allow, [{ type: "m.room_membership", room_id: space.roomId }]);
   }
   // The Space itself is joined via invite, not restricted.
-  assert.equal(stateOf(space, "m.room.join_rules", ""), undefined, "space has no join_rules override");
+  assert.equal(stateOf(space, "m.room.join_rules", "").join_rule, "public", "space is public so auto_join_rooms can join it");
 });
 
 test("voice rooms are MatrixRTC call rooms; #clips is unencrypted for the bot", async () => {

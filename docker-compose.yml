@@ -43,6 +43,8 @@ services:
       TUWUNEL_ALLOW_FEDERATION: "false"
       TUWUNEL_ALLOW_REGISTRATION: "true"
       TUWUNEL_REGISTRATION_TOKEN: "${TUWUNEL_REGISTRATION_TOKEN}"
+      TUWUNEL_AUTO_JOIN_ROOMS: >-
+        ["#squadz:${CHAT_FQDN}", "#general:${CHAT_FQDN}", "#games:${CHAT_FQDN}", "#clips:${CHAT_FQDN}", "#memes:${CHAT_FQDN}", "#lounge:${CHAT_FQDN}", "#game-night:${CHAT_FQDN}"]
       TUWUNEL_WELL_KNOWN__CLIENT: "https://${CHAT_FQDN}"
       TUWUNEL_WELL_KNOWN__SERVER: "${CHAT_FQDN}:443"
       TUWUNEL_WELL_KNOWN__LIVEKIT_URL: "https://${RTC_FQDN}/livekit/jwt"

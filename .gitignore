@@ -16,3 +16,4 @@ Thumbs.db
 
 # Runtime data volumes (if mounted locally)
 data/
+backups/

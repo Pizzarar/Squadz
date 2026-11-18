@@ -357,6 +357,12 @@ export async function seed(client, config, log = () => {}) {
   for (const slug of Object.keys(roomIds)) log(`  ${slug}: ${roomIds[slug]}`);
 
   summary.spaceLinksChanged = await ensureSpaceLinks(client, config, spaceId, roomIds);
+  // Tuwunel auto_join_rooms only joins public rooms (config/tuwunel.toml). The
+  // Space is public so new registrants land in it; registration itself is
+  // token-gated and federation is off. Child rooms stay restricted-to-Space.
+  summary.spacePublic = await setStateIfChanged(client, spaceId, "m.room.join_rules", "", {
+    join_rule: "public",
+  });
   summary.emoji = await ensureEmojiPack(client, config, spaceId, roomIds);
   summary.invited = await inviteFriends(client, config, spaceId, log);
 

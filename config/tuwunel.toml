@@ -22,6 +22,21 @@ allow_registration = true
 # Overridden at runtime by TUWUNEL_REGISTRATION_TOKEN=${TUWUNEL_REGISTRATION_TOKEN}
 registration_token = "replace_via_env"
 
+# New registrants auto-join the Space and its rooms (Tuwunel src/api/client/register.rs,
+# option documented in tuwunel-example.toml). Rooms must already exist and be joined by the
+# server (run scripts/bootstrap.mjs once) and be joinable: the Space is public, the child
+# rooms are restricted to Space members. Overridden at runtime by TUWUNEL_AUTO_JOIN_ROOMS
+# in docker-compose.yml so the aliases follow CHAT_FQDN. Space first, then children.
+auto_join_rooms = [
+  "#squadz:chat.example.com",
+  "#general:chat.example.com",
+  "#games:chat.example.com",
+  "#clips:chat.example.com",
+  "#memes:chat.example.com",
+  "#lounge:chat.example.com",
+  "#game-night:chat.example.com",
+]
+
 # Allow up to 50 MB uploads for clips, custom emoji packs, and room media
 max_request_size = 52_428_800
 
