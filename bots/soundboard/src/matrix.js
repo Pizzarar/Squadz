@@ -192,7 +192,10 @@ export class MatrixClient {
         throw lastErr;
       }
       const declared = Number(res.headers?.get?.('content-length'));
-      if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge(maxBytes);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        await res.body?.cancel?.().catch(() => {});
+        throw tooLarge(maxBytes);
+      }
       const chunks = [];
       let total = 0;
       if (res.body && typeof res.body.getReader === 'function') {

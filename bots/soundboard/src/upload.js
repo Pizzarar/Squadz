@@ -6,7 +6,9 @@ import { randomBytes } from 'node:crypto';
 export const MAX_CLIP_BYTES = 1024 * 1024; // 1 MB
 export const MAX_CLIP_SECONDS = 15;
 export const MOD_POWER_LEVEL = 50;
-export const CLIP_NAME_RE = /^[a-z0-9_-]{1,32}$/;
+export const ADD_DECODE_TIMEOUT_MS = 10_000;
+// Must start alphanumeric: sanitizeClipName/loadClips (play + list) reject a leading `_` or `-`.
+export const CLIP_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const CLIP_EXTS = ['.mp3', '.ogg', '.wav'];
 
 /**

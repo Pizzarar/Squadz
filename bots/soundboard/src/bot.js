@@ -8,6 +8,7 @@ import { parseCommand, stripReplyFallback } from './commands.js';
 import {
   MAX_CLIP_BYTES,
   MAX_CLIP_SECONDS,
+  ADD_DECODE_TIMEOUT_MS,
   MOD_POWER_LEVEL,
   detectAudioFormat,
   parseMxc,
@@ -16,6 +17,9 @@ import {
   saveClipAtomic,
 } from './upload.js';
 import { BYTES_PER_SAMPLE, CHANNELS, SAMPLE_RATE } from './audio.js';
+
+// Decoded-PCM cap for uploads: a hair over the 15 s limit so >15 s is still reported as such.
+const MAX_UPLOAD_PCM_BYTES = (MAX_CLIP_SECONDS + 1) * SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE;
 import { ClipRegistry } from './clips.js';
 import {
   DEFAULT_EXPIRES_MS,
@@ -50,6 +54,7 @@ export class SoundboardBot {
     commandRoomId = null,
     commandRoomAlias = null,
     idleTimeoutMs = 60_000,
+    addDecodeTimeoutMs = ADD_DECODE_TIMEOUT_MS,
     memberExpiresMs = DEFAULT_EXPIRES_MS,
     decodeClip = decodeClipToPcm,
     rtcFactory = defaultRtcFactory,
@@ -68,6 +73,12 @@ export class SoundboardBot {
     this.commandRoomId = commandRoomId;
     this.commandRoomAlias = commandRoomAlias;
     this.idleTimeoutMs = idleTimeoutMs;
+    this.addDecodeTimeoutMs = addDecodeTimeoutMs;
+    /** Aborted on shutdown() to cancel in-flight upload decodes. */
+    this._shutdownController = new AbortController();
+    /** In-flight `!sb add` jobs (run off the /sync loop), serialized via `_addChain`. @type {Set<Promise<void>>} */
+    this._addJobs = new Set();
+    this._addChain = Promise.resolve();
     this.memberExpiresMs = memberExpiresMs;
     this.decodeClip = decodeClip;
     this.rtcFactory = rtcFactory;
@@ -130,6 +141,11 @@ export class SoundboardBot {
       const replyTo = ev.content?.['m.relates_to']?.['m.in_reply_to']?.event_id;
       const cmd = parseCommand(replyTo ? stripReplyFallback(ev.content?.body) : ev.content?.body);
       if (!cmd) continue;
+      if (cmd.action === 'add') {
+        // Download + decode can take seconds: run it off the /sync loop (one at a time).
+        this._enqueueAdd(commandRoomId, cmd, { sender: ev.sender, replyToEventId: replyTo });
+        continue;
+      }
       try {
         await this.handleCommand(commandRoomId, cmd, { sender: ev.sender, replyToEventId: replyTo });
       } catch (err) {
@@ -221,6 +237,16 @@ export class SoundboardBot {
     }
   }
 
+  _enqueueAdd(roomId, cmd, ctx) {
+    const job = this._addChain
+      .then(() => this.handleCommand(roomId, cmd, ctx))
+      .catch((err) => this.logger.error?.(`[soundboard] Error handling command: ${err.message}`))
+      .finally(() => this._addJobs.delete(job));
+    this._addChain = job;
+    this._addJobs.add(job);
+    return job;
+  }
+
   /** True if `userId` has power level >= 50 in `roomId` (reads m.room.power_levels + m.room.create). */
   async _isMod(roomId, userId) {
     if (!userId) return false;
@@ -279,7 +305,11 @@ export class SoundboardBot {
       await saveClipAtomic(this.clips.clipsDir, cmd.clip, data, fmt.ext, {
         replace: cmd.replace,
         validate: async (tmpPath) => {
-          const pcm = await this.decodeClip(tmpPath);
+          const signal = AbortSignal.any([
+            this._shutdownController.signal,
+            AbortSignal.timeout(this.addDecodeTimeoutMs),
+          ]);
+          const pcm = await this.decodeClip(tmpPath, { signal, maxBytes: MAX_UPLOAD_PCM_BYTES });
           if (!pcm || pcm.length === 0) throw userError('the audio could not be decoded or is empty.');
           seconds = pcm.length / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE);
           if (seconds > MAX_CLIP_SECONDS) {
@@ -289,6 +319,8 @@ export class SoundboardBot {
       });
     } catch (err) {
       if (err.userMessage) return reject(err.userMessage);
+      if (err.code === 'PCM_TOO_LARGE') return reject(`clip is longer than ${MAX_CLIP_SECONDS} s.`);
+      if (isAbortError(err) || err.name === 'TimeoutError') return reject('decoding timed out or was cancelled.');
       if (err.code === 'EEXISTS') return reject('a clip with that name already exists (a moderator can use --replace).');
       this.logger.error?.(`[soundboard] Saving clip failed: ${err.message}`);
       return reject(`could not save (${err.message}).`);
@@ -401,6 +433,7 @@ export class SoundboardBot {
 
   /** Resolve once every in-flight playback has finished (used by tests and shutdown). */
   async whenIdle() {
+    await Promise.all([...this._addJobs]);
     while (this.playbacks.size > 0) {
       await Promise.all([...this.playbacks.values()].map((p) => p.promise));
     }
@@ -524,6 +557,8 @@ export class SoundboardBot {
    */
   async shutdown() {
     this._running = false;
+    this._shutdownController.abort();
+    await Promise.all([...this._addJobs]);
     for (const pb of this.playbacks.values()) pb.controller.abort();
     await this.whenIdle();
     const activeSessions = [...this.sessions.values()];

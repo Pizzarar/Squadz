@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommand, stripReplyFallback } from '../src/commands.js';
 import {
+  CLIP_NAME_RE,
   MAX_CLIP_BYTES,
   detectAudioFormat,
   parseMxc,
@@ -39,6 +40,19 @@ describe('parseCommand add/remove', () => {
   it('strips the legacy reply fallback', () => {
     assert.equal(stripReplyFallback('> <@a:b> clip.wav\n\n!sb add boom'), '!sb add boom');
     assert.equal(stripReplyFallback('!sb add boom'), '!sb add boom');
+  });
+});
+
+describe('clip name regex', () => {
+  it('requires an alphanumeric first char (matches sanitizeClipName)', () => {
+    for (const bad of ['-x', '_x', '--x', '_', '-']) assert.equal(CLIP_NAME_RE.test(bad), false, bad);
+    for (const good of ['x', '0a', 'a_b-c', 'x'.repeat(32)]) assert.equal(CLIP_NAME_RE.test(good), true, good);
+    assert.equal(CLIP_NAME_RE.test('x'.repeat(33)), false);
+  });
+  it('parser rejects names starting with - or _', () => {
+    for (const body of ['!sb add -x', '!sb add _x', '!sb remove -x', '!sb remove _x']) {
+      assert.equal(parseCommand(body).action, 'help', body);
+    }
   });
 });
 
@@ -133,6 +147,13 @@ describe('MatrixClient.downloadMedia', () => {
     const { calls, client } = mk([new Response('', { status: 404 }), ok(Buffer.from('x'))]);
     await client.downloadMedia('chat.test', 'id1');
     assert.match(calls[1].url, /\/_matrix\/media\/v3\/download\/chat\.test\/id1$/);
+  });
+  it('cancels the body when Content-Length already exceeds maxBytes', async () => {
+    let cancelled = false;
+    const body = new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(4)); }, cancel() { cancelled = true; } });
+    const { client } = mk([new Response(body, { status: 200, headers: { 'content-length': '999' } })]);
+    await assert.rejects(client.downloadMedia('s', 'i', { maxBytes: 10 }), (e) => e.code === 'TOO_LARGE');
+    assert.equal(cancelled, true);
   });
   it('enforces maxBytes on the stream', async () => {
     const { client } = mk([ok(Buffer.alloc(100))]);
@@ -234,6 +255,49 @@ describe('bot !sb add / remove', () => {
         content: { msgtype: 'm.text', body: '> <@bob:chat.test> clip.wav\n\n!sb add synced', 'm.relates_to': { 'm.in_reply_to': { event_id: '$ev' } } },
       }] } } } },
     });
+    // add runs off the /sync loop: handleSyncResponse returns before the notice is sent
+    await bot.whenIdle();
     assert.match(notices[0], /^Saved clip "synced"/);
+  });
+  it('sync loop is not blocked by a slow add', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const { bot, notices } = setup();
+    bot.decodeClip = async () => { await gate; return Buffer.alloc(96000); };
+    await bot.handleSyncResponse({
+      rooms: { join: { [ROOM]: { timeline: { events: [{
+        type: 'm.room.message', sender: ALICE,
+        content: { msgtype: 'm.text', body: '!sb add slow', 'm.relates_to': { 'm.in_reply_to': { event_id: '$ev' } } },
+      }] } } } },
+    });
+    assert.deepEqual(notices, []); // returned while the decode is still pending
+    release();
+    await bot.whenIdle();
+    assert.match(notices[0], /^Saved clip "slow"/);
+  });
+  it('passes a timeout signal + PCM cap to decodeClip; a timeout is reported, not hung', async () => {
+    const { bot, notices, add } = setup();
+    let opts;
+    bot.addDecodeTimeoutMs = 20;
+    bot.decodeClip = (_p, o) => { opts = o; return new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(Object.assign(new Error('Aborted'), { name: 'AbortError' })))); };
+    await add('hang');
+    assert.equal(opts.maxBytes, 16 * 96000);
+    assert.match(notices[0], /decoding timed out/);
+    assert.deepEqual(readdirSync(dir), []);
+  });
+  it('PCM_TOO_LARGE from the decoder is reported as too long', async () => {
+    const { bot, notices, add } = setup();
+    bot.decodeClip = async () => { throw Object.assign(new Error('big'), { code: 'PCM_TOO_LARGE' }); };
+    await add('huge');
+    assert.match(notices[0], /longer than 15 s/);
+  });
+  it('shutdown() aborts an in-flight add decode', async () => {
+    const { bot, notices, add } = setup();
+    bot.decodeClip = (_p, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(Object.assign(new Error('Aborted'), { name: 'AbortError' }))));
+    const p = add('stuck');
+    await new Promise((r) => setTimeout(r, 20));
+    await bot.shutdown();
+    await p;
+    assert.match(notices[0], /timed out or was cancelled/);
   });
 });

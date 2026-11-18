@@ -65,7 +65,7 @@ export function parseCommand(body) {
     }
     const clip = args[0];
     if (!CLIP_NAME_RE.test(clip)) {
-      return { action: 'help', error: `Invalid clip name "${clip}": use 1-32 characters from a-z 0-9 _ -` };
+      return { action: 'help', error: `Invalid clip name "${clip}": use 1-32 characters from a-z 0-9 _ - and start with a letter or digit` };
     }
     return sub === 'add' ? { action: 'add', clip, replace: flags.length > 0 } : { action: 'remove', clip };
   }
