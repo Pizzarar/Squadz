@@ -66,9 +66,10 @@ Use the line setup printed, e.g. `100.101.102.103 chat.squadz.mesh rtc.squadz.me
 
 ```bash
 node scripts/validate.mjs
-docker compose up -d --build caddy         # first build compiles Caddy; ~2-4 min
-node scripts/squadz.mjs ca export          # writes ./squadz-ca.crt, prints trust steps
-docker compose up -d --build               # now everything; lk-jwt-service mounts the CA
+docker compose up -d --build --no-deps caddy   # first build compiles Caddy; ~2-4 min. --no-deps keeps lk-jwt-service down until the CA exists
+node scripts/squadz.mjs ca export              # writes ./squadz-ca.crt, prints trust steps
+docker compose up -d --build                   # now everything; lk-jwt-service mounts the CA
+docker compose up -d --force-recreate --no-deps lk-jwt-service   # only if it ever ran with an empty CA
 ```
 
 Trust `squadz-ca.crt` on every device (the command prints these):

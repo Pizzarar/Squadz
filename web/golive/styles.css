@@ -14,7 +14,7 @@ body {
     radial-gradient(50rem 36rem at 100% 110%, rgba(46, 230, 166, .09), transparent 60%);
   background-attachment: fixed;
 }
-main { max-width: 34rem; margin: 0 auto; padding: 2rem 1rem 3rem; }
+main { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem 3rem; }
 .brand { display: flex; align-items: center; gap: .8rem; margin-bottom: 1.5rem; }
 .brand img { border-radius: 12px; }
 h1 { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: .01em; }
@@ -45,4 +45,5 @@ button:hover { border-color: var(--accent); }
 #grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .75rem; }
 .tile video { width: 100%; background: #000; border-radius: 10px; }
 .tile label { margin: .2rem 0; }
+#view-login, #view-lobby { max-width: 34rem; margin-inline: auto; }
 #view-watching, #view-streaming { max-width: none; }

@@ -225,9 +225,9 @@ async function setupMesh(flags, envFile, ask) {
   console.log(`\nNext:`);
   console.log(`  1. Hosts entry on THIS host and on every device (Windows: C:\\Windows\\System32\\drivers\\etc\\hosts, as admin):`);
   console.log(`       ${hostsLine(meshIp, chatHost, rtcHost)}`);
-  console.log(`  2. docker compose up -d caddy`);
+  console.log(`  2. docker compose up -d --build --no-deps caddy   (--no-deps: lk-jwt-service must not start before the CA exists)`);
   console.log(`  3. node scripts/squadz.mjs ca export      (then trust squadz-ca.crt on each device)`);
-  console.log(`  4. docker compose up -d --build`);
+  console.log(`  4. docker compose up -d --build           (or: node scripts/squadz.mjs update)`);
   console.log(`  5. node scripts/squadz.mjs doctor && node scripts/bootstrap.mjs --env-file .env`);
   console.log(`Full walkthrough: docs/DEPLOY-MESHNET.md`);
 }
@@ -626,9 +626,29 @@ ${text}`);
 
 // ---------------------------------------------------------------------------
 
+/**
+ * In internal-TLS (mesh) mode native fetch must trust the exported Caddy root CA. Node only reads
+ * NODE_EXTRA_CA_CERTS at startup, so return the env to re-exec with, or null if no re-exec is needed.
+ */
+export function caReexecEnv(env, caFile, exists = (f) => fs.existsSync(f) && fs.statSync(f).size > 0) {
+  if (!isInternalTls(env) || env.NODE_EXTRA_CA_CERTS || env.SQUADZ_CA_REEXEC || !exists(caFile)) return null;
+  return { ...env, NODE_EXTRA_CA_CERTS: caFile, SQUADZ_CA_REEXEC: "1" };
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { flags, pos } = parseArgs(rest);
+  if (cmd && !["setup", "ca", "update"].includes(cmd) && !flags.help) {
+    const envFile = resolveEnvFile(flags);
+    if (fs.existsSync(envFile)) {
+      loadEnvFile(envFile);
+      const reenv = caReexecEnv(process.env, path.join(root, CA_FILE));
+      if (reenv) {
+        const r = spawnSync(process.execPath, process.argv.slice(1), { stdio: "inherit", env: reenv });
+        process.exit(r.status ?? 1);
+      }
+    }
+  }
   if (!cmd || cmd === "-h" || cmd === "--help" || flags.help) return void process.stdout.write(USAGE);
   switch (cmd) {
     case "setup": return cmdSetup(flags);

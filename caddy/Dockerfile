@@ -39,6 +39,12 @@ RUN cd /srv/cinny \
  && grep -q 'src="/squadz-init.js"' index.html \
  && grep -q 'href="/squadz/icon-32.png"' index.html \
  && grep -q 'content="#0E0F22"' index.html \
+ && grep -q 'content="Squadz"' index.html \
+ && ! grep -q 'content="Cinny"' index.html \
+ && grep -q 'rel="icon" type="image/svg+xml" href="/squadz/icon.svg"' index.html \
+ && ! grep -q 'id="favicon" rel="shortcut icon"' index.html \
+ && grep -q 'href="/squadz/icon-180.png"' index.html \
+ && test -s /srv/cinny/manifest.json \
  && ! grep -q '<title>Cinny' index.html
 
 FROM caddy:2.9.1-alpine AS final
