@@ -443,6 +443,35 @@ check('CI e2e overlay: Caddyfile TLS switch defaults to DNS-01, overlay + workfl
   return 'Caddy switch + overlay + workflow verified';
 });
 
+// 9. Hosted web client (P2 block C3b): pinned + checksummed Cinny, locked config, Caddy routing order
+check('Hosted web client: pinned Cinny + sha256, rendered config, Caddy catch-all last', () => {
+  const df = readFileRel('caddy/Dockerfile');
+  assert(/ARG CINNY_VERSION=\d+\.\d+\.\d+/.test(df), 'Dockerfile must pin CINNY_VERSION to x.y.z');
+  assert(/ARG CINNY_SHA256=[0-9a-f]{64}\b/.test(df), 'Dockerfile must pin CINNY_SHA256 (64 hex)');
+  assert(df.includes('sha256sum -c'), 'Dockerfile must verify the Cinny tarball with sha256sum -c');
+  assert(df.includes('ENTRYPOINT') && df.includes('squadz-entrypoint.sh'), 'Dockerfile must install the config-rendering entrypoint');
+
+  const tpl = JSON.parse(readFileRel('config/web-client/config.json.template').replace(/__CHAT_FQDN__/g, 'chat.example.test'));
+  assert(JSON.stringify(tpl.homeserverList) === '["chat.example.test"]', 'config template homeserverList must be exactly [CHAT_FQDN]');
+  assert(tpl.defaultHomeserver === 0, 'config template defaultHomeserver must be 0');
+  assert(tpl.allowCustomHomeservers === false, 'config template must set allowCustomHomeservers=false');
+  assert(tpl.featuredCommunities.rooms.length === 0 && tpl.featuredCommunities.spaces.length === 0, 'featuredCommunities must be empty');
+  assert(readFileRel('caddy/web-client-entrypoint.sh').includes('CHAT_FQDN'), 'entrypoint must render CHAT_FQDN');
+  assert(
+    compose.services.caddy.volumes.some((v) => v.startsWith('./config/web-client/config.json.template:')),
+    'caddy service must mount config/web-client/config.json.template'
+  );
+
+  const cf = readFileRel('caddy/Caddyfile').replace(/\r\n/g, '\n');
+  const chat = cf.slice(cf.indexOf('https://{$CHAT_FQDN}'), cf.indexOf('}\n\nhttps://{$RTC_FQDN} {'));
+  const handles = [...chat.matchAll(/^\thandle(?:_path)?\b([^{\n]*)\{/gm)].map((m) => m[1].trim());
+  assert(handles.length >= 5 && handles[handles.length - 1] === '', `catch-all "handle {" must be the last handler in the chat block (got: ${JSON.stringify(handles)})`);
+  assert(chat.includes('try_files {path} /index.html'), 'Cinny block needs SPA fallback try_files');
+  assert(chat.includes('X-Frame-Options SAMEORIGIN') && chat.includes("frame-ancestors 'self'"), 'Cinny block needs SAMEORIGIN + frame-ancestors for Element Call');
+  assert(!/^\s*Permissions-Policy\b/mi.test(chat), 'must not set Permissions-Policy (breaks camera/mic/screen share)');
+  return 'Cinny pinned+verified, config locked, catch-all handler last';
+});
+
 // Print summary report
 console.log('Squadz Static Validation (scripts/validate.mjs)');
 console.log('===============================================');

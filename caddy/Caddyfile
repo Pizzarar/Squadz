@@ -48,6 +48,31 @@ https://{$CHAT_FQDN} {
 		root * /srv/golive
 		file_server
 	}
+
+	# Hosted web client (Block C3b): Cinny at the chat root. MUST stay the last handle so the
+	# routes above win. History routing -> SPA fallback to /index.html.
+	# /srv/cinny is baked into the image; config.json is rendered at start by
+	# caddy/web-client-entrypoint.sh from config/web-client/config.json.template.
+	handle {
+		root * /srv/cinny
+		encode zstd gzip
+		header {
+			# Element Call runs in a same-origin iframe, so SAMEORIGIN (not DENY).
+			X-Frame-Options SAMEORIGIN
+			Content-Security-Policy "frame-ancestors 'self'"
+			Referrer-Policy no-referrer
+			X-Content-Type-Options nosniff
+			# No Permissions-Policy: it would block camera/mic/display-capture (cinny#2767).
+		}
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		header /public/element-call/assets/* Cache-Control "public, max-age=31536000, immutable"
+		header /config.json Cache-Control no-cache
+		header /index.html Cache-Control no-cache
+		header /sw.js Cache-Control no-cache
+		header /public/element-call/index.html Cache-Control no-cache
+		try_files {path} /index.html
+		file_server
+	}
 }
 
 https://{$RTC_FQDN} {
