@@ -273,8 +273,12 @@ async function resolveLocal(h) {
 }
 
 /** Mesh-mode doctor I/O: talk to MESH_IP directly with the right SNI/Host, trusting only squadz-ca.crt. */
-function meshIo(env) {
-  const caFile = path.join(root, CA_FILE);
+export function meshCaPath(env, envFile) {
+  return env.NODE_EXTRA_CA_CERTS || path.join(path.dirname(path.resolve(envFile)), CA_FILE);
+}
+
+function meshIo(env, envFile) {
+  const caFile = meshCaPath(env, envFile);
   const readCa = () => (fs.existsSync(caFile) && fs.statSync(caFile).size > 0 ? fs.readFileSync(caFile, "utf8") : null);
   const req = (url) => new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -348,8 +352,8 @@ function realIo(env) {
 }
 
 async function cmdDoctor(flags) {
-  loadEnv(flags);
-  const io = isInternalTls(process.env) ? { ...realIo(process.env), ...meshIo(process.env) } : realIo(process.env);
+  const envFile = loadEnv(flags);
+  const io = isInternalTls(process.env) ? { ...realIo(process.env), ...meshIo(process.env, envFile) } : realIo(process.env);
   const results = await runDoctor(process.env, io);
   console.log(formatDoctor(results));
   return results.every((r) => r.ok) ? 0 : 1;
