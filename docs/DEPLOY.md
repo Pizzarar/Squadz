@@ -131,5 +131,5 @@ node scripts/squadz.mjs restore backups/<file>.tar.gz --yes [--with-config]
 
 ## Sources
 
-- Tuwunel v1.5.1: `auto_join_rooms` and `registration_token_file` in `tuwunel-example.toml`; auto-join in `src/api/client/register.rs`; `token issue [--once|--max-uses|--max-age]` in `src/admin/token/`; `users list-users` in `src/admin/user/commands.rs`; `server backup-database` in `src/admin/server/`; first user becomes admin in `src/service/users/register.rs`. <https://github.com/matrix-construct/tuwunel>
+- Tuwunel v1.5.1: `auto_join_rooms` and `registration_token_file` in `tuwunel-example.toml`; auto-join in `src/service/users/register.rs`; `token issue [--once|--max-uses|--max-age]` in `src/admin/token/`; `users list-users` in `src/admin/user/commands.rs`; `server backup-database` in `src/admin/server/`; first user becomes admin in `src/service/users/register.rs`. <https://github.com/matrix-construct/tuwunel>
 - lk-jwt-service 0.4.4 `/healthz`: <https://github.com/element-hq/lk-jwt-service>
