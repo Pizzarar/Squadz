@@ -48,3 +48,6 @@ Each block goes to Review - Gemini (Claude wrote it). The reviewer's own first l
 - D1: PASS 0/0/1 ce5a447 (rn-14c9978ea5ea). MERGED d5bbdb8.
 - D2: FAIL 1/1/1 a766717 (ffmpeg no timeout/decoded cap; name regex). Fixed aaaaa5f, in re-review rn-5ee3dc438696.
 - D3: DONE 1013f17, CI+E2E green; in review rn-ae1a0388118a.
+- D2: re-review PASS 0/0/0 aaaaa5f. MERGED 4e8e951. D3: FAIL 1/0/1 (--topic parse) -> fixed 661afea, PASS 0/0/0. MERGED e4aa55f.
+- D4 (squadz service: boot unit + nightly backup timer, backup --keep, doctor warnings): PASS 0/0/1 66d5bc9. D5 (phone push: Tuwunel pushes to matrix.org Sygnal with federation off; E2E mock gateway proves /notify): PASS 0/0/0 8e0b809. Both MERGED 0baf21e (lead resolved union conflicts).
+- C9 (flaky soundboard upload tests, unref'd AbortSignal.timeout): PASS 0/0/0 b3cec2b. MERGED 7911c7f. C10 (D4 low: systemd unit escaping) 8a9c63f in review rn-164d79a016ec.
