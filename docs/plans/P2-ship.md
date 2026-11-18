@@ -31,3 +31,20 @@ Each block goes to Review - Gemini (Claude wrote it). The reviewer's own first l
 - C1: PASS 0/0/2 89b6508 (rn-b81d13540bbc). MERGED. C2: PASS 0/0/3 34eae6f (rn-318e0f90c36b). MERGED (.gitignore union conflict resolved) at 2b21dcf. dev: validate 10/10, scripts 27/27, e2e helpers 6/6.
 - In flight: C3b host Cinny (Implement - Sonnet rn-97ad090d79a3, unit/c3b); C4 = the 5 lows from the C1/C2 reviews (Work Order - DSP rn-750c7a1b275e, unit/c4). No clash: C4 doesn't touch compose/Caddyfile.
 - Real-stack e2e has never run: it needs `dev` pushed (owner OK pending).
+- C3b: PASS 0/0/3 e01f7e1 (rn-1080ae09cfce). MERGED; doc lows fixed by lead 9cc47ef.
+- C4 (C1/C2 lows): PASS 0/0/0 aa7014a (rn-65d418e29d1b). MERGED aa508d4.
+- C5 (CI green): PASS 0/0/0 c2d8e7d (rn-8bdf34654cbe). MERGED fc780e4. Real bugs: no lockfiles; broken /golive redir. dev CI 44244328409 + E2E 44244328424 GREEN (first real-stack run on dev).
+- C6 (invite web link default, --no-web): PASS 0/0/0 188e92a. MERGED 676f854.
+- C7 (E2E Cinny + Caddy routes): PASS 0/0/2 2132df3. MERGED e910b9c. C8 (C7/D1 lows): PASS 716f365. MERGED 6991e75.
+
+## P3 · Discord features (opened 2026-11-18)
+
+| Block | Scope | Clashes with |
+|---|---|---|
+| D1 | `squadz emoji add/remove/list` (MSC2545 emoticon/sticker) | D3 (squadz.mjs) |
+| D2 | soundboard uploads from chat (`!sb add/remove`, mod-gated) | none (bots/) |
+| D3 | `squadz server show/set` (name, icon, topics, pinned welcome) | D1 (squadz.mjs; D1 merged first) |
+
+- D1: PASS 0/0/1 ce5a447 (rn-14c9978ea5ea). MERGED d5bbdb8.
+- D2: FAIL 1/1/1 a766717 (ffmpeg no timeout/decoded cap; name regex). Fixed aaaaa5f, in re-review rn-5ee3dc438696.
+- D3: DONE 1013f17, CI+E2E green; in review rn-ae1a0388118a.
