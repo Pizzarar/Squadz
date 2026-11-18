@@ -51,18 +51,31 @@ export function sniffImage(buf) {
     }
     return null;
   }
-  // JPEG: walk the marker segments to the first SOFn frame header.
+  // JPEG: walk the marker segments to the first SOFn frame header. Any truncation or
+  // malformed length returns null, exactly like an unsupported header.
   if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
     let i = 2;
-    while (i + 9 < buf.length) {
+    while (i < buf.length) {
       if (buf[i] !== 0xff) { i++; continue; }
-      const marker = buf[i + 1];
-      if (marker === 0xff) { i++; continue; }            // fill byte
-      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
-      const len = buf.readUInt16BE(i + 2);
+      // A marker may be padded with any number of 0xFF fill bytes.
+      while (i < buf.length && buf[i] === 0xff) i++;
+      if (i >= buf.length) return null;                  // truncated inside fill bytes
+      const marker = buf[i++];
+      if (marker === 0x00) continue;                     // 0xFF00: stuffed byte in scan data, not a marker
+      // Standalone markers carry no length field: SOI, TEM and RSTn.
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      // Every other marker is followed by a u16 length that includes those two bytes.
+      if (i + 2 > buf.length) return null;               // truncated length field
+      const len = buf.readUInt16BE(i);
+      if (len < 2) return null;                          // malformed: a segment cannot be shorter than its length field
+      const end = i + len;
+      if (end > buf.length) return null;                 // truncated segment
       const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-      if (isSof) return { mimetype: "image/jpeg", h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
-      i += 2 + len;
+      if (isSof) {
+        if (end < i + 7) return null;                    // segment too short to hold height/width
+        return { mimetype: "image/jpeg", h: buf.readUInt16BE(i + 3), w: buf.readUInt16BE(i + 5) };
+      }
+      i = end;
     }
     return null;
   }
