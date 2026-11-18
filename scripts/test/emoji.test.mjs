@@ -1,6 +1,7 @@
 // scripts/test/emoji.test.mjs: `squadz emoji` helpers + flow against the mock homeserver.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -147,6 +148,8 @@ const SERVER = "chat.squadz.test";
 const mock = createMockHomeserver({ serverName: SERVER, registrationToken: "t" });
 let client;
 let config;
+// Shortcodes bootstrap seeds from assets/emoji + assets/stickers (P4 E3 seed art).
+const SEEDED = ["emoji", "stickers"].flatMap((d) => readdirSync(path.resolve(here, "..", "..", "assets", d)).filter((f) => f.endsWith(".png")).map((f) => f.slice(0, -4)));
 const packOf = (alias) => mock.state.rooms.get(mock.state.aliases.get(alias)).state.get("im.ponies.room_emotes\u0000");
 
 before(async () => {
@@ -167,7 +170,7 @@ test("addEmoji: sets pack in Space + 4 text rooms (not voice), keeps seeded imag
   assert.equal(r.changed.length, 5);
   for (const slug of ["squadz", "general", "games", "clips", "memes"]) {
     const pack = packOf(`#${slug}:${SERVER}`);
-    assert.deepEqual(Object.keys(pack.images).sort(), ["gg", "party", "pixel", "squadz", "wave"], slug);
+    assert.deepEqual(Object.keys(pack.images).sort(), [...SEEDED, "pixel"].sort(), slug);
     assert.deepEqual(pack.images.pixel.usage, ["emoticon"]);
     assert.deepEqual(pack.images.pixel.info, { w: 16, h: 16, size: 33, mimetype: "image/png" });
     assert.match(pack.images.pixel.url, /^mxc:\/\//);
@@ -182,12 +185,13 @@ test("addEmoji --sticker, re-add replaces, others kept; list + remove", async ()
   await addEmoji(client, config, { shortcode: "big", bytes: gif(100, 100), filename: "big.gif", usage: "sticker" });
   const pack = packOf(`#general:${SERVER}`);
   assert.notEqual(pack.images.big.url, first);
-  assert.equal(Object.keys(pack.images).length, 6);
+  assert.equal(Object.keys(pack.images).length, SEEDED.length + 2);
 
   const list = await listEmoji(client, config);
-  assert.deepEqual(list.map((i) => i.shortcode), ["big", "gg", "party", "pixel", "squadz", "wave"]);
+  assert.deepEqual(list.map((i) => i.shortcode), [...SEEDED, "big", "pixel"].sort((a, b) => a.localeCompare(b)));
   assert.deepEqual(list.find((i) => i.shortcode === "big").usage, ["sticker"]);
-  assert.deepEqual(list.find((i) => i.shortcode === "wave").usage, ["emoticon"], "seeded image falls back to pack usage");
+  assert.deepEqual(list.find((i) => i.shortcode === "wave").usage, ["emoticon"], "seeded emoji usage");
+  assert.deepEqual(list.find((i) => i.shortcode === "gn").usage, ["sticker"], "seeded sticker usage");
 
   const rm = await removeEmoji(client, config, "big");
   assert.equal(rm.changed.length, 5);

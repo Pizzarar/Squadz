@@ -36,6 +36,8 @@ before(async () => {
     serverName: SERVER, homeserverUrl: mock.url(port), registrationToken: "t",
     adminUser: "admin", adminUserId: `@admin:${SERVER}`, adminPassword: "pw",
     invite: [], emojiDir: path.resolve(here, "..", "..", "assets", "emoji"),
+    // No seed avatars here: these tests exercise setServer --icon on a blank Space.
+    avatarDir: path.resolve(here, "no-such-avatars"),
   };
   client = createMatrixClient(config.homeserverUrl);
   await seed(client, config);

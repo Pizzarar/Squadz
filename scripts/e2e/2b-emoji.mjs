@@ -1,7 +1,14 @@
 // Phase 2b: `squadz emoji` against the live Tuwunel. Adds a tiny png emoji and a sticker via the
 // real lib (same code the CLI calls), reads the pack back from a text room, then removes them.
+import { readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { addEmoji, listEmoji, removeEmoji } from "../lib/emoji.mjs";
 import { assert, assertEq, loadConfig, loggedInClient, readState, run, step } from "./lib.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const SEEDED = ["emoji", "stickers"].flatMap((d) => readdirSync(path.resolve(here, "..", "..", "assets", d)).filter((f) => f.endsWith(".png")).map((f) => f.slice(0, -4))).sort();
 
 // 1x1 transparent PNG.
 const PNG = Buffer.from(
@@ -25,7 +32,7 @@ run(async () => {
     assert(img && String(img.url).startsWith("mxc://"), "e2e_dot has an mxc url");
     assertEq([img.info.w, img.info.h, img.info.size, img.info.mimetype], [1, 1, PNG.length, "image/png"], "info block");
     assertEq(img.usage, ["emoticon"], "emoticon usage");
-    assertEq(["gg", "party", "squadz", "wave"].every((k) => k in pack.images), true, "seeded images kept");
+    assertEq(SEEDED.every((k) => k in pack.images), true, "seeded images kept");
   });
 
   await step("emoji add --sticker + list + remove", async () => {
@@ -35,6 +42,6 @@ run(async () => {
     assertEq(list.map((i) => i.shortcode).includes("e2e_stk"), true, "listed");
     await removeEmoji(client, config, "e2e_dot");
     await removeEmoji(client, config, "e2e_stk");
-    assertEq(Object.keys((await read()).images).sort(), ["gg", "party", "squadz", "wave"], "back to the seeded pack");
+    assertEq(Object.keys((await read()).images).sort(), SEEDED, "back to the seeded pack");
   });
 });

@@ -24,3 +24,4 @@ Squadz is glue around these open-source projects. Nothing here is copied code un
 - Implemented mesh-only mode (`setup --mesh-only`, `ca export`, hosts-file DNS, internal-TLS doctor, CA-trusting lk-jwt-service overlay) — Thanks to Caddy (local CA / `tls internal`, PKI paths) by the Caddy authors (Matthew Holt et al.), lk-jwt-service by element-hq and NordVPN Meshnet / Tailscale CGNAT addressing by Nord Security / Tailscale Inc.
 - Implemented Squadz Cinny branding (title/manifest/favicon injection, Folds colour-variable theme override in squadz.css) — Thanks to Cinny by cinnyapp (Ajay Bura and contributors)
 - Implemented Squadz logo, wordmark and Go-Live restyle — original artwork; PNG export — Thanks to resvg-js by yisibl
+- Implemented seed art (Space/room avatars, 12-emoji pack, 4-sticker pack; original artwork, SVG source in assets/art-src) — Thanks to resvg-js by yisibl
