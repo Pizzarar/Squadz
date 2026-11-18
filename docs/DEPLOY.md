@@ -107,6 +107,19 @@ node scripts/squadz.mjs role sam mod      # owner = 100, mod = 50, member = 0
 - [ ] Open **Lounge**, tap the call button: mic works, your friend hears you.
 - [ ] Turn Wi-Fi off, stay on mobile data with Tailscale on: still connects.
 
+## 8b. Web client check (Cinny at `https://chat.<DOMAIN>/`)
+
+The Caddy image bundles Cinny v4.12.8 (pinned tarball, sha256-verified at build) and renders
+its `config.json` from `CHAT_FQDN` at start (template: `config/web-client/config.json.template`).
+No new env vars. After `docker compose up -d --build`:
+
+- [ ] `https://chat.<DOMAIN>/` loads the Cinny login page with the homeserver fixed to `chat.<DOMAIN>` (no server picker).
+- [ ] `https://chat.<DOMAIN>/config.json` shows `homeserverList: ["chat.<DOMAIN>"]`.
+- [ ] Register with the token in the browser, land in the Squadz Space, send a message.
+- [ ] In `Lounge`, click the call button: mic works, and a friend on Element X hears you. This is risk 1 in [CLIENTS.md](CLIENTS.md) (Cinny ships Element Call 0.20.1, Element X a newer one). If interop fails, switch to the Element Web fallback described there.
+- [ ] Screen share from the call controls works (no `Permissions-Policy` header is sent on purpose).
+- [ ] Bumping Cinny: change `CINNY_VERSION` and `CINNY_SHA256` together in `caddy/Dockerfile`, rebuild.
+
 ## 9. On-device checks (the unverified items from P1)
 
 Run these once the stack is live with a friend. They need real devices, so they are not covered by CI. Record the outcome in `docs/plans/P1-foundation.md` In flight.
