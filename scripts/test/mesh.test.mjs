@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { cmdCaExport, parseArgs } from "../squadz.mjs";
+import { caReexecEnv, cmdCaExport, parseArgs } from "../squadz.mjs";
 import {
   buildMeshEnvValues, caTrustInstructions, generateSecrets, hostsLine, isInternalTls, parseNordLocalIp,
   renderEnv, runDoctor, validateEnvForMode, validateMeshInputs, checkMeshHost, checkMeshTls, formatDoctor,
@@ -173,4 +173,15 @@ test("ca export fails clearly when caddy has no CA yet", () => {
 
 test("trust instructions state the Element X Android limit honestly", () => {
   assert.match(caTrustInstructions(), /Element X on Android will most likely refuse/);
+});
+
+test("caReexecEnv: trusts the exported CA only in internal TLS mode, once, when the file is non-empty", () => {
+  const yes = () => true;
+  const r = caReexecEnv({ SQUADZ_TLS: "internal" }, "/x/squadz-ca.crt", yes);
+  assert.equal(r.NODE_EXTRA_CA_CERTS, "/x/squadz-ca.crt");
+  assert.equal(r.SQUADZ_CA_REEXEC, "1");
+  assert.equal(caReexecEnv({ SQUADZ_TLS: "internal" }, "/x/ca", () => false), null, "empty/missing placeholder");
+  assert.equal(caReexecEnv({ SQUADZ_TLS: "internal", NODE_EXTRA_CA_CERTS: "/y" }, "/x/ca", yes), null, "user already set it");
+  assert.equal(caReexecEnv({ SQUADZ_TLS: "internal", SQUADZ_CA_REEXEC: "1" }, "/x/ca", yes), null, "no re-exec loop");
+  assert.equal(caReexecEnv({ SQUADZ_TLS: "acme" }, "/x/ca", yes), null, "public TLS mode");
 });
